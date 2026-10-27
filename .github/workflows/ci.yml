@@ -1,0 +1,119 @@
+name: Marine IoT Optimizer CI/CD
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Node Dependencies & Typecheck
+        run: |
+          cd api
+          npm ci
+          npx drizzle-kit generate
+          npm run build
+
+      - name: Install Python Dependencies & Lint
+        run: |
+          cd ml-spark
+          pip install --upgrade pip
+          pip install ruff
+          ruff check .
+
+      - name: Build & Typecheck Frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+  unit-and-integration-tests:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ocean_admin
+          POSTGRES_PASSWORD: ocean_secure_password
+          POSTGRES_DB: oceanclean_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Python 3.11 & Java
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Run NestJS API Tests (Unit & E2E)
+        env:
+          DATABASE_URL: postgresql://ocean_admin:ocean_secure_password@localhost:5432/oceanclean_db
+          JWT_SECRET: super_secret_jwt_key_marine_clean_2026
+          SENSOR_API_KEY: marine_sensor_key_secret_val_2026
+        run: |
+          cd api
+          npm ci
+          npm test
+          npm run test:e2e
+
+      - name: Run Python ML & Big Data Pytest Suite
+        run: |
+          cd ml-spark
+          pip install -r requirements.txt
+          pytest -v
+
+  docker-compose-build:
+    name: Docker Compose Build & Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Configuration
+        run: |
+          docker compose config
+
+      - name: Build Docker Containers
+        run: |
+          docker compose build api ml-spark web
+
