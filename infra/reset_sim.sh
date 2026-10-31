@@ -1,7 +1,7 @@
 #!/bin/sh
 # Clean simulation start: sim clock back to SIM_START at SIM_RATE, unpaused; a freshly seeded
 # debris world; empty live state, routes, windows, alerts, faults and metrics; and no telemetry
-# history in the lake (a new run reuses seq 1, 2, ...).
+# history in the lake (a new run numbers ticks from LIVE_SEQ_START + 1 again; a backfill, 1..n).
 # Keeps the batch layer's currents, hotspots and their exports (data_sources), Kafka, and the
 # telemetry/survey stream checkpoints. Drops the windows query's checkpoint: its watermark is
 # in the old run's sim time and would drop every event of the new run as late.

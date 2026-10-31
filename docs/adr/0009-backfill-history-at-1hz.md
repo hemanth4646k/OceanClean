@@ -1,0 +1,15 @@
+# 0009 The backfill is the previous mission, logged at 1 Hz, numbered below the live run
+
+Status: accepted, 2026-10-31 (M6)
+
+The spec promised a 30-day backfill of "~2.6M events". At the live tick (one report per sim-minute) 30 days is only 43,200 events; 2.6M needs one per second. Decided with the user: the backfill logs at 1 Hz, so the claim is true. The live run keeps its 60 s tick. `--tick` is a flag, so `--tick 60` falls back to ~43k events with no code change.
+
+**What it is.** `python simulator/sim_main.py --fast-forward 30d --tick 1` (Compose `backfill`, profile `batch`) simulates the vessel's previous mission, [SIM_START − 30 d, SIM_START), with its own debris world (`HISTORY_SEED`). It uses the same physics and the same routing library, through an onboard autopilot. That autopilot sees an hourly survey, runs the recalc gate every 30 sim-minutes and accepts every plan. It runs as fast as the CPU allows, without the sim clock. It sends no debris surveys, so the live `debris_patches` table is untouched, and it never reads or writes the live sim state file. The vessel steps every tick; patches drift every 60 s, as in the live run, because they move centimetres per second. A test checks that 1 s and 60 s ticks give the same track and fuel within 1 %.
+
+**Seq ranges.** Silver dedups on `(vessel_id, seq)` and measures each tick from the previous seq, so history and live must not share seqs. History numbers its ticks 1..n. A live run starts at `LIVE_SEQ_START` (10,000,000, so its first tick is 10,000,001), which keeps seq and event time in step across both. Silver counts a tick's energy and debris only when it directly follows the previous seq; a gap (history → live, or a dropped queue) starts a new segment with nothing measured. A live run from before M6 numbers from 1 and needs `infra/reset_sim.sh`; the backfill refuses to start until then.
+
+**Sinks (ADR-0005).** Every backfill event is older than the live state and the windows' watermark. So bronze and silver get all of it, the guarded UPSERT none (live state never moves back), and the windowed query none (no history windows, no anomaly alerts computed at the wrong tick size). That only holds once the live run is past SIM_START plus the watermark, so the backfill refuses to start (and exits) until the live run is an hour past SIM_START.
+
+**Currents.** Sim time maps onto the mission window looped (ADR-0007), so the history's 30 days run on data days 15–45 of the window, the same real days the live mission reaches in its second half. The dates on history events are sim dates, not the dates of the currents used.
+
+**Measured (2026-10-31, dev machine).** 2,592,000 events in 210 s (~12,300/s end to end, ingestion acked). Spark took them in `maxOffsetsPerTrigger` (200k) batches alongside live ticks. The history vessel cleared 193 t with 78 plans. Bronze telemetry ended at 2.61M rows. A full `telemetry-etl` run over it took 45 s. Daily energy is ~1.0–1.5 MWh in both the 1 Hz history and the 1/min live days.

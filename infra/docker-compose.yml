@@ -98,6 +98,19 @@ services:
       minio-init: { condition: service_completed_successfully }
     mem_limit: 256m
 
+  # M6: the previous mission's 30 days at 1 Hz (~2.6M events) burst through ingestion, then exit.
+  # Needs the live run an hour past SIM_START; it never touches the live sim state.
+  backfill:
+    <<: *py
+    profiles: [batch]
+    command: python simulator/sim_main.py --fast-forward 30d --tick 1
+    depends_on:
+      ingestion: { condition: service_healthy }
+      postgis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    mem_limit: 256m
+    restart: "no"
+
   api:
     <<: *py
     command: uvicorn api_app:app --host 0.0.0.0 --port 8000

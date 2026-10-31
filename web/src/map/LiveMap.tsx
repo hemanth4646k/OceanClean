@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { GeoJSON, MapContainer, Pane, Rectangle, useMap } from 'react-leaflet'
 import land from '@/assets/ne_110m_land.json'
 import type { LiveState } from '@/lib/useLive'
-import type { Box, Grid, Hotspots, LatLon } from '@/lib/types'
+import type { Box, Grid, Hotspots, LatLon, Replay } from '@/lib/types'
 import { GraticuleLayer } from './GraticuleLayer'
 import { HeatLayer } from './HeatLayer'
 import { COLORS } from './colors'
@@ -17,6 +17,7 @@ import {
 } from './OverlayLayers'
 import { withMoves } from './routes'
 import { ParticleLayer } from './ParticleLayer'
+import { ReplayLayer } from './ReplayLayer'
 
 export type LayerKey =
   'particles' | 'heatmap' | 'hotspots' | 'wake' | 'patches' | 'ghosts' | 'route'
@@ -43,6 +44,7 @@ export function LiveMap({
   hotspots,
   particleSpeed,
   modify,
+  replay,
 }: {
   live: LiveState
   layers: Layers
@@ -52,6 +54,8 @@ export function LiveMap({
   particleSpeed: number
   /** Operator-moved targets of the pending route while modifying it, else null. */
   modify: { moves: Record<string, LatLon>; onMove: (patchId: string, to: LatLon) => void } | null
+  /** The time slider: replay parcels at a frame instead of the live overlays, else null. */
+  replay: { data: Replay; frame: number } | null
 }) {
   const { vessel, routes, patches } = live
   const collected = new Set(patches.filter((p) => p.mass_kg <= 0).map((p) => p.patch_id))
@@ -80,7 +84,7 @@ export function LiveMap({
         />
       </Pane>
       <Pane name="hotspots" style={{ zIndex: 340 }} />
-      {layers.heatmap && <HeatLayer patches={patches} />}
+      {layers.heatmap && !replay && <HeatLayer patches={patches} />}
       {layers.hotspots && hotspots && <HotspotLayer data={hotspots} />}
       {layers.particles && grid && <ParticleLayer grid={grid} speed={particleSpeed} />}
       {missionBox && (
@@ -96,6 +100,40 @@ export function LiveMap({
           }}
         />
       )}
+      {replay && <ReplayLayer replay={replay.data} frame={replay.frame} />}
+      {!replay && (
+        <LiveOverlays
+          live={live}
+          layers={layers}
+          targets={targets}
+          collected={collected}
+          here={here}
+          modify={modify}
+        />
+      )}
+    </MapContainer>
+  )
+}
+
+/** Patches, ghosts, routes and the vessel: everything the time slider hides. */
+function LiveOverlays({
+  live,
+  layers,
+  targets,
+  collected,
+  here,
+  modify,
+}: {
+  live: LiveState
+  layers: Layers
+  targets: Set<string>
+  collected: Set<string>
+  here: LatLon | null
+  modify: { moves: Record<string, LatLon>; onMove: (patchId: string, to: LatLon) => void } | null
+}) {
+  const { vessel, routes, patches } = live
+  return (
+    <>
       {layers.patches && <PatchLayer patches={patches} targets={targets} />}
       {/* Labels on one route only: the one awaiting a decision, else the one being followed. */}
       {layers.ghosts && routes.pending && (
@@ -119,6 +157,6 @@ export function LiveMap({
       {modify && routes.pending && (
         <DraggableTargets route={routes.pending} moves={modify.moves} onMove={modify.onMove} />
       )}
-    </MapContainer>
+    </>
   )
 }

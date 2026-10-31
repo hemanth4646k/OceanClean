@@ -6,4 +6,5 @@ export const COLORS = {
   ghost: '#e2e8f0',
   hotspot: '#d946ef',
   wake: '#5eead4',
+  parcel: '#fb923c',
 }

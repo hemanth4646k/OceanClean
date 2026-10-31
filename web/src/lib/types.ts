@@ -202,3 +202,10 @@ export interface Analytics {
   acceptance: { operator: number | null; autopilot: number | null; overall: number | null }
   validation: { median_ratio: number; n_convergent: number; n_rest: number } | null
 }
+
+/** Time-slider replay: parcels drifting through the mission window's real daily currents. */
+export interface Replay {
+  step_s: number
+  frames: { t: string; data_t: string }[] // t: sim time (for /currents/grid), data_t: real day
+  parcels: { id: string; track: LatLon[] }[]
+}

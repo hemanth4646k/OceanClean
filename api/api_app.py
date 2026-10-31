@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 import hitl
 import numpy as np
 import psycopg
+import replay
 import store
 from currents import CurrentField
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -57,6 +58,7 @@ class Lake:
         self.client, self.bucket, self.sim_start = client, bucket, sim_start
         self._field: CurrentField | None = None
         self._hotspots: dict | None = None
+        self._replay: dict | None = None
 
     def _get(self, key: str) -> bytes:
         try:
@@ -73,6 +75,19 @@ class Lake:
         if self._hotspots is None:
             self._hotspots = json.loads(self._get(EXPORT_HOTSPOTS))
         return self._hotspots
+
+    def replay(self) -> dict:
+        """The time slider's parcel drift; computed once (a few seconds), then cached."""
+        if self._replay is None:
+            parcels = replay.seeds(self.hotspots()["hotspots"], MISSION_BOX)
+            self._replay = replay.replay(self.field(), parcels)
+        return self._replay
+
+    def warm(self) -> None:
+        """Compute the replay ahead of the first request; without the exports, the first request
+        computes it instead."""
+        with contextlib.suppress(HTTPException):
+            self.replay()
 
     def analytics(self) -> dict | None:
         """The telemetry batch job's export, or None before its first run."""
@@ -206,6 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.dsn = settings.pg_dsn(env)
     app.state.vessel_id = env["VESSEL_ID"]
     app.state.lake = Lake(minio_client(env), env["LAKE_BUCKET"], settings.sim_start(env))
+    threading.Thread(target=app.state.lake.warm, name="replay-warm", daemon=True).start()
     autopilot = {"true": True, "false": False}[env["AUTOPILOT"].lower()]
     app.state.hub = Hub(app.state.dsn, app.state.vessel_id, autopilot, float(env["HITL_TIMEOUT_S"]))
     task = asyncio.create_task(app.state.hub.run())
@@ -359,6 +375,13 @@ def currents_grid(t: datetime | None = None) -> dict:
         "u": np.round(u, 4).tolist(),
         "v": np.round(v, 4).tolist(),
     }
+
+
+@app.get("/replay")
+def replay_frames() -> dict:
+    """Time slider: parcels from the mission-box hotspots drifting through the window's real
+    daily currents, one frame per 6 sim-hours; fetch a frame's grid with /currents/grid?t=."""
+    return app.state.lake.replay()
 
 
 class ClockUpdate(BaseModel):

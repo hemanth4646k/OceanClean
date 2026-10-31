@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 from currents import CurrentField
 from debris import Patch, collect, debris_density, drift_patches
@@ -55,6 +56,23 @@ class World:
             anchor=tuple(d["anchor"]) if d.get("anchor") else None,  # absent before M3 review
             link=Link(link["offline_until"], queue),
         )
+
+
+def to_telemetry(v: VesselState, ts: datetime, buffered: bool = False) -> Telemetry:
+    return Telemetry(
+        vessel_id=v.vessel_id,
+        event_ts=ts,
+        seq=v.seq,
+        lat=v.lat,
+        lon=v.lon,
+        heading_deg=v.heading_deg % 360,
+        speed_kn=v.speed_kn,
+        battery_pct=v.battery_pct,
+        fuel_l=v.fuel_l,
+        debris_density=v.debris_density,
+        hold_fill_pct=v.hold_fill_pct,
+        buffered=buffered,
+    )
 
 
 def waypoint_targets(waypoints: Iterable[Mapping]) -> RouteTargets:
@@ -128,6 +146,21 @@ def tick(
     fuel_factor: float = 1.0,
 ) -> None:
     """Advance the vessel and the debris world by dt sim seconds starting at sim time t."""
+    move_vessel(w, v, t, dt, field, route, fuel_factor)
+    drift_patches(w.patches, field, t, dt, rng)
+    v.debris_density = debris_density(w.patches, v.lat, v.lon)
+
+
+def move_vessel(
+    w: World,
+    v: VesselState,
+    t: float,
+    dt: float,
+    field: CurrentField,
+    route: RouteTargets | None,
+    fuel_factor: float = 1.0,
+) -> None:
+    """The vessel's part of a tick: steer, move, collect or offload, burn. Patches stay put."""
     if w.mode == "offload" and t >= w.offload_until:
         v.hold_fill_pct = 0.0
         v.fuel_l = FUEL_TANK_L
@@ -149,6 +182,4 @@ def tick(
             v.hold_fill_pct = 100.0
             mode, w.offload_until = "offload", t + dt + OFFLOAD_S
     burn(v, mode, speed * KN_TO_MS, dt, fuel_factor)
-    drift_patches(w.patches, field, t, dt, rng)
-    v.debris_density = debris_density(w.patches, v.lat, v.lon)
     w.mode = mode

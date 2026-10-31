@@ -1,14 +1,16 @@
-import { Waves } from 'lucide-react'
+import { History, Waves } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ClockBar } from '@/components/ClockBar'
 import { HitlModal, ModifyBar } from '@/components/HitlModal'
 import { LayerPanel } from '@/components/LayerPanel'
+import { ReplayBar } from '@/components/ReplayBar'
 import { RouteCard } from '@/components/RouteCard'
 import { TelemetryPanel } from '@/components/TelemetryPanel'
 import { Toasts } from '@/components/Toasts'
+import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { getJSON, ms, postJSON } from '@/lib/api'
-import type { Clock, Config, Grid, Hitl, Hotspots, LatLon, Route } from '@/lib/types'
+import type { Clock, Config, Grid, Hitl, Hotspots, LatLon, Replay, Route } from '@/lib/types'
 import { simNowMs, useLive } from '@/lib/useLive'
 import { LiveMap, type LayerKey, type Layers } from '@/map/LiveMap'
 import { AnalyticsView } from '@/views/AnalyticsView'
@@ -24,6 +26,7 @@ const TABS: { key: Tab; label: string; admin: boolean }[] = [
 
 const GRID_REFRESH_MS = 5000 // the u/v slice follows the sim clock
 const OFFLINE_REAL_S = 10 // live state this far behind the clock (real seconds): link down
+const REPLAY_FRAME_MS = 150 // 6 sim-hours per frame: the 45-day window plays in about 27 s
 
 /** Retry a static fetch until it succeeds (the batch exports may not exist yet). */
 function useStatic<T>(path: string): T | null {
@@ -46,15 +49,56 @@ function useStatic<T>(path: string): T | null {
   return data
 }
 
-function useGrid(): Grid | null {
+/** The u/v slice at sim time t (a replay frame), else following the sim clock. */
+function useGrid(t: string | null): Grid | null {
   const [grid, setGrid] = useState<Grid | null>(null)
   useEffect(() => {
-    const load = () => getJSON<Grid>('/currents/grid').then(setGrid, () => undefined)
+    let stale = false
+    const path = t ? `/currents/grid?t=${encodeURIComponent(t)}` : '/currents/grid'
+    const load = () =>
+      getJSON<Grid>(path).then(
+        (g) => !stale && setGrid(g),
+        () => undefined,
+      )
     load()
-    const id = setInterval(load, GRID_REFRESH_MS)
-    return () => clearInterval(id)
-  }, [])
+    const id = t ? undefined : setInterval(load, GRID_REFRESH_MS)
+    return () => {
+      stale = true
+      clearInterval(id)
+    }
+  }, [t])
   return grid
+}
+
+/** The time slider: frames load on first open; while playing, the frame advances and loops. */
+interface ReplayState {
+  data: Replay | null
+  frame: number
+  playing: boolean
+  setFrame: (f: number) => void
+  setPlaying: (on: boolean) => void
+}
+
+function useReplay(open: boolean): ReplayState {
+  const [data, setData] = useState<Replay | null>(null)
+  const [frame, setFrame] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  useEffect(() => {
+    if (open && !data) getJSON<Replay>('/replay').then(setData, () => undefined)
+  }, [open, data])
+  const n = data?.frames.length ?? 0
+  useEffect(() => {
+    if (!open || !playing || n === 0) return
+    const id = setInterval(() => setFrame((f) => (f + 1) % n), REPLAY_FRAME_MS)
+    return () => clearInterval(id)
+  }, [open, playing, n])
+  return {
+    data: open ? data : null,
+    frame: Math.min(frame, Math.max(0, n - 1)),
+    playing,
+    setFrame,
+    setPlaying,
+  }
 }
 
 function tabFromHash(): Tab {
@@ -66,7 +110,9 @@ export default function App() {
   const [live, dispatch] = useLive()
   const config = useStatic<Config>('/config')
   const hotspots = useStatic<Hotspots>('/hotspots')
-  const grid = useGrid()
+  const [replayOpen, setReplayOpen] = useState(false)
+  const replay = useReplay(replayOpen)
+  const grid = useGrid(replay.data ? replay.data.frames[replay.frame].t : null)
   const [layers, setLayers] = useState<Layers>({
     particles: true,
     heatmap: true,
@@ -218,6 +264,25 @@ export default function App() {
                   onAutopilot={setAutopilot}
                 />
               </div>
+              <Separator />
+              <div className="space-y-2">
+                <h2 className="text-sm font-semibold">Drift replay</h2>
+                <p className="text-xs text-muted-foreground">
+                  Debris parcels from the hotspot cells, drifting through the mission window of real
+                  NOAA daily currents.
+                </p>
+                <Button
+                  size="sm"
+                  variant={replayOpen ? 'default' : 'secondary'}
+                  className="w-full"
+                  onClick={() => {
+                    setReplayOpen(!replayOpen)
+                    replay.setPlaying(!replayOpen)
+                  }}
+                >
+                  <History /> {replayOpen ? 'Back to live' : 'Open time slider'}
+                </Button>
+              </div>
               {hotspots && (
                 <>
                   <Separator />
@@ -237,6 +302,7 @@ export default function App() {
                 grid={grid}
                 hotspots={hotspots}
                 particleSpeed={particleSpeed}
+                replay={replay.data && { data: replay.data, frame: replay.frame }}
                 modify={
                   mod && {
                     moves: mod.moves,
@@ -247,12 +313,26 @@ export default function App() {
               />
               <div className="pointer-events-none absolute inset-x-0 top-4 z-[1000] flex justify-center">
                 <div className="pointer-events-auto">
-                  <ClockBar
-                    clock={live.clock}
-                    simNow={simNow}
-                    simStart={config?.sim_start ?? null}
-                    onControl={control}
-                  />
+                  {replay.data ? (
+                    <ReplayBar
+                      replay={replay.data}
+                      frame={replay.frame}
+                      playing={replay.playing}
+                      onFrame={(f) => {
+                        replay.setPlaying(false)
+                        replay.setFrame(f)
+                      }}
+                      onPlaying={replay.setPlaying}
+                      onClose={() => setReplayOpen(false)}
+                    />
+                  ) : (
+                    <ClockBar
+                      clock={live.clock}
+                      simNow={simNow}
+                      simStart={config?.sim_start ?? null}
+                      onControl={control}
+                    />
+                  )}
                 </div>
               </div>
               {mod && pending && live.hitl && (

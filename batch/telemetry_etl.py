@@ -1,7 +1,7 @@
 """Batch layer, telemetry: bronze ticks -> silver (dedup, per-tick energy and debris) -> gold (M5).
 
 Bronze holds every tick the stream received, duplicates and late rows included (ADR-0005). Silver
-keeps one row per (vessel_id, seq) and measures each tick from the vessel's previous one: energy
+keeps one row per (vessel_id, seq) and measures each tick from the one before it: energy
 is fuel burned (as brake energy) plus battery drawn, debris is the hold's growth. Refuels and
 offloads are state resets, not consumption, so their jumps count as zero. Gold sums them per day
 and per day and 5-degree zone; a small JSON export feeds the API's Analytics tab.
@@ -56,8 +56,12 @@ def silver_telemetry(bronze: DataFrame) -> DataFrame:
     ticks = bronze.select(*SPARK_COLUMNS).dropDuplicates(["vessel_id", "seq"])
     w = Window.partitionBy("vessel_id").orderBy("seq")
 
+    # Only a tick's direct predecessor measures it. A seq gap starts a new segment: the backfill's
+    # last tick and a live run's first (LIVE_SEQ_START + 1) are different missions.
+    follows = F.col("seq") - F.lag("seq").over(w) == 1
+
     def drop(c: str) -> Column:
-        return F.coalesce(F.lag(c).over(w) - F.col(c), F.lit(0.0))
+        return F.when(follows, F.lag(c).over(w) - F.col(c)).otherwise(F.lit(0.0))
 
     burned = F.greatest(drop("fuel_l"), F.lit(0.0))  # negative = refuelled
     return ticks.select(

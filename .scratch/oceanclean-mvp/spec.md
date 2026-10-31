@@ -8,7 +8,7 @@ Status: approved (grilling session 2026-10-31). Demo: live demo + presentation, 
 2. **It drifts.** A time slider replays debris patches advected through a historical period by real daily currents, with flowing current particles underneath.
 3. **Predictive dispatch.** The optimizer proposes an intercept route. The map shows each target patch now, a ghost at its predicted position at intercept time, and the dashed drift line between them. The operator Accepts, Rejects or Modifies it; with no answer in 30 s the proposal expires and the vessel keeps its current route, or loiters if it has none (SRS §5.4, ADR-0008). Autopilot (the simulation default) decides instead.
 4. **Cleaned in ~1 month.** On a compressed sim clock, the single cleaner works through the patch cluster. Patches fade as they're collected; counters and a Recharts curve show debris removed vs energy used, ending around sim day 30.
-5. **It is big data.** The Metrics tab shows pipeline health (events/s, Kafka lag, micro-batch duration, lake row counts). A 30-day telemetry backfill bursts ~2.6M events through Kafka. The Analytics tab reads gold aggregates.
+5. **It is big data.** The Metrics tab shows pipeline health (events/s, Kafka lag, micro-batch duration, lake row counts). A 30-day telemetry backfill (the previous mission, logged at 1 Hz) bursts ~2.6M events through Kafka (ADR-0009). The Analytics tab reads gold aggregates.
 
 ## Scope decisions
 

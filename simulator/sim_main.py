@@ -3,10 +3,14 @@
 Each tick moves the vessel along the active route (read from PostGIS) or loiters, collects and
 offloads debris, drifts the patches through the mission currents and emits one telemetry event.
 Telemetry goes through the offline link; a debris survey goes out every 60 sim-minutes.
+
+`--fast-forward 30d [--tick 1]` instead bursts the previous mission's history and exits
+(backfill.py).
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -18,6 +22,16 @@ from pathlib import Path
 import httpx
 import psycopg
 import sim_state
+from backfill import (
+    HISTORY_SEED,
+    LIVE_SEQ_START,
+    Autopilot,
+    burst,
+    chunks,
+    history,
+    live_ready,
+    parse_duration,
+)
 from currents import CurrentField
 from debris import seed_patches
 from minio import Minio
@@ -30,7 +44,7 @@ from oceanclean_common.telemetry import Telemetry
 from sim_clock import SimClock
 from urllib3.exceptions import HTTPError as Urllib3Error
 from vessel import VesselState
-from world import SURVEY_EVERY_S, RouteTargets, World, tick, waypoint_targets
+from world import SURVEY_EVERY_S, RouteTargets, World, tick, to_telemetry, waypoint_targets
 
 log = logging.getLogger("simulator")
 
@@ -40,23 +54,6 @@ ROUTE_POLL_S = 3.0  # real seconds between active-route reads
 CLOCK_SYNC_S = 1.0  # real seconds between clock reports / control reads
 START = (35.0, -142.0)
 LEAK_FACTOR = 1.5  # fuel lost per unit of power during an injected leak (POST /sim/fault)
-
-
-def to_telemetry(v: VesselState, ts: datetime, buffered: bool = False) -> Telemetry:
-    return Telemetry(
-        vessel_id=v.vessel_id,
-        event_ts=ts,
-        seq=v.seq,
-        lat=v.lat,
-        lon=v.lon,
-        heading_deg=v.heading_deg % 360,
-        speed_kn=v.speed_kn,
-        battery_pct=v.battery_pct,
-        fuel_l=v.fuel_l,
-        debris_density=v.debris_density,
-        hold_fill_pct=v.hold_fill_pct,
-        buffered=buffered,
-    )
 
 
 def surveys(w: World, ts: datetime) -> list[PatchSurvey]:
@@ -164,9 +161,72 @@ def post_json(client: httpx.Client, url: str, items: list[str]) -> bool:
         return False
 
 
+def fresh_start(vessel_id: str, hotspots: dict, seed: int, seq: int) -> tuple[VesselState, World]:
+    """A vessel at START with a full tank, and a debris world seeded from the hotspots."""
+    v = VesselState(vessel_id, lat=START[0], lon=START[1], heading_deg=90.0, speed_kn=0.0, seq=seq)
+    world = World(seed_patches(hotspots["hotspots"], MISSION_BOX, N_PATCHES, random.Random(seed)))
+    total = sum(p.mass_kg for p in world.patches)
+    log.info("seeded %d patches, %.0f t, from mission-box hotspots", N_PATCHES, total / 1000)
+    return v, world
+
+
+def live_state(dsn: str, vessel_id: str) -> tuple[int, datetime] | None:
+    with psycopg.connect(dsn, connect_timeout=3) as conn:
+        row = conn.execute(
+            "SELECT seq, event_ts FROM vessel_state WHERE vessel_id = %s", [vessel_id]
+        ).fetchone()
+    return None if row is None else (int(row[0]), row[1])
+
+
+def fast_forward(span_s: float, tick_s: float) -> None:
+    """Burst the history [SIM_START - span, SIM_START) through ingestion; see backfill.py."""
+    env = os.environ
+    vessel_id, sim_start = env["VESSEL_ID"], settings.sim_start(env)
+    why = live_ready(live_state(settings.pg_dsn(env), vessel_id), sim_start)
+    if why:
+        raise SystemExit(f"backfill not started: {why}")
+    n = int(span_s // tick_s)
+    if n >= LIVE_SEQ_START:
+        raise SystemExit(f"{n} ticks would reach the live seq range; use a longer --tick")
+    field, hotspots = load_exports(minio_client(env), env["LAKE_BUCKET"], sim_start)
+    v, world = fresh_start(vessel_id, hotspots, HISTORY_SEED, 0)
+    rng = random.Random(f"{HISTORY_SEED}:drift")
+    pilot = Autopilot(field)
+    t0 = sim_start.timestamp() - n * tick_s
+    log.info(
+        "backfill: %d ticks of %g s from %s to %s",
+        n,
+        tick_s,
+        datetime.fromtimestamp(t0, timezone.utc).isoformat(),
+        sim_start.isoformat(),
+    )
+    started = time.monotonic()
+    with httpx.Client(timeout=30) as client:
+        sent = burst(
+            chunks(history(world, v, pilot, t0, n, tick_s, rng), n),
+            lambda batch: post_json(client, env["INGEST_URL"], batch),
+        )
+    took = time.monotonic() - started
+    log.info(
+        "backfill done: %d events in %.0f s (%.0f/s); %.0f t collected; plans %s",
+        sent,
+        took,
+        sent / took,
+        world.collected_kg / 1000,
+        pilot.reasons,
+    )
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per POST otherwise
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--fast-forward", metavar="SPAN", help="backfill this much history, e.g. 30d")
+    ap.add_argument("--tick", type=float, default=1.0, help="backfill tick, sim seconds")
+    args = ap.parse_args()
+    if args.fast_forward:
+        fast_forward(parse_duration(args.fast_forward), args.tick)
+        return
     env = os.environ
     vessel_id = env["VESSEL_ID"]
     state_file = Path(env["SIM_STATE_DIR"]) / f"{vessel_id}.json"
@@ -183,13 +243,9 @@ def main() -> None:
         log.info("resuming at %s seq=%d", start.isoformat(), v.seq)
     else:
         start = sim_start
-        v = VesselState(vessel_id, lat=START[0], lon=START[1], heading_deg=90.0, speed_kn=0.0)
-    if world is None:
-        world = World(
-            seed_patches(hotspots["hotspots"], MISSION_BOX, N_PATCHES, random.Random(WORLD_SEED))
-        )
-        total = sum(p.mass_kg for p in world.patches)
-        log.info("seeded %d patches, %.0f t, from mission-box hotspots", N_PATCHES, total / 1000)
+        v, world = fresh_start(vessel_id, hotspots, WORLD_SEED, LIVE_SEQ_START)
+    if world is None:  # state from before M3 kept the vessel but no world
+        _, world = fresh_start(vessel_id, hotspots, WORLD_SEED, v.seq)
     rng = random.Random(f"{WORLD_SEED}:{v.seq}")  # reproducible, and fresh after a restart
 
     clock = SimClock(start, rate=float(env["SIM_RATE"]))

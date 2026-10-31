@@ -18,5 +18,7 @@
 - **Residual**: (measured − expected energy) / expected for one window; its z-score against recent normal windows flags a fuel-burn anomaly.
 - **Sim clock**: compressed simulation time; all `event_ts` values are sim time. The operator sets its rate and pause through the API (`sim_clock` table).
 - **Wake**: the vessel's recent track on the live map (last 48 sim-hours).
+- **Backfill**: the vessel's previous mission, the 30 sim-days before SIM_START logged at 1 Hz (2.59M events), burst through ingestion and Kafka in a few minutes by `--fast-forward 30d`; seqs 1..n, below the live run's (ADR-0009).
+- **Drift replay / time slider**: debris parcels from the mission-box hotspot cells advected through the mission window's real daily currents, shown frame by frame (6 sim-hours) over the current particles of that day (`/replay`).
 - **Bronze / silver / gold**: raw / cleaned / aggregated lake layers.
 - **Zone**: 5° lat/lon cell id derived at ingestion, part of the Kafka key.

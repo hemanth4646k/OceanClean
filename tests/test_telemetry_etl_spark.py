@@ -97,6 +97,22 @@ def test_silver_dedups_and_measures_each_tick_from_the_previous_seq(spark: Spark
     assert "hour" not in silver.columns
 
 
+def test_a_seq_gap_starts_a_new_segment_with_nothing_measured(spark: SparkSession) -> None:
+    """Backfill history (seq 1..n) then a live run (from LIVE_SEQ_START + 1): the jump between
+    the two missions' end and start state is not one tick's consumption."""
+    events = [
+        tel(1, 900.0, 60.0, 50.0),
+        tel(2, 890.0, 55.0, 52.0),
+        tel(10_000_001, 12_000.0, 100.0, 0.0),
+        tel(10_000_002, 11_990.0, 99.0, 1.0),
+    ]
+    rows = by_seq(etl.silver_telemetry(bronze(spark, events)))
+    assert rows[2]["energy_kwh"] == pytest.approx(10 * KWH_PER_L + 0.05 * BATTERY_KWH)
+    assert rows[10_000_001]["energy_kwh"] == 0.0 and rows[10_000_001]["collected_kg"] == 0.0
+    assert rows[10_000_002]["energy_kwh"] == pytest.approx(10 * KWH_PER_L + 0.01 * BATTERY_KWH)
+    assert rows[10_000_002]["collected_kg"] == pytest.approx(0.01 * HOLD_CAPACITY_KG)
+
+
 @pytest.mark.parametrize(
     "lat, lon",
     [(35.2, -142.4), (-12.5, 7.5), (0.0, 0.0), (-0.1, -0.1), (40.0, -145.0), (-5.0, 179.9)],
