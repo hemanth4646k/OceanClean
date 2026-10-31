@@ -3,7 +3,7 @@
 Big Data (BDA course) prototype: a single-vessel, dynamic route optimizer for ocean plastic cleanup. Synthetic IoT telemetry + public ocean-current data (Copernicus/NOAA) flow through a Lambda architecture to a live map. Goal: maximize debris collected per unit of vessel energy by anticipating drift.
 
 Source of truth for requirements: [software_requirements_specification.md](software_requirements_specification.md). If code and SRS disagree, surface it; don't silently pick one.
-UI mood references: `demo1.jpeg` (map + current particles + control panel), `demo2.jpeg` (operator "AI Route Optimization" Accept/Override modal), `demo3.jpeg` (admin metrics dashboard). Dark maritime theme.
+UI: dark maritime theme. Live map with current particles and a control panel, an operator "AI Route Optimization" Accept/Modify/Reject modal, and admin Metrics/Analytics dashboards.
 
 ## Architecture (see SRS §2)
 

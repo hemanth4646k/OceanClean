@@ -146,7 +146,7 @@ function FaultCard({ latest }: { latest: StoredAlert | undefined }) {
   )
 }
 
-/** Admin Metrics (demo3): pipeline health from the StreamingQueryListener, vessel energy. */
+/** Admin Metrics: pipeline health from the StreamingQueryListener, vessel energy. */
 export function MetricsView() {
   const { data: m, error } = usePoll<Metrics>('/metrics?minutes=15&hours=48', 5000)
   if (!m) {

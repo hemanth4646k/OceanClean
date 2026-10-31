@@ -90,7 +90,7 @@ export function ChartCard({
   )
 }
 
-/** A headline number with an optional sparkline (demo3 tiles). */
+/** A headline number with an optional sparkline (Metrics tiles). */
 export function StatTile({
   label,
   value,

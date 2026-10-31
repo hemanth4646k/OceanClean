@@ -84,7 +84,7 @@
 }
 
 .dark {
-    /* Maritime dark: navy surfaces, teal accent (demo1). */
+    /* Maritime dark: navy surfaces, teal accent. */
     --background: oklch(0.17 0.025 250);
     --foreground: oklch(0.95 0.01 240);
     --card: oklch(0.21 0.03 250);

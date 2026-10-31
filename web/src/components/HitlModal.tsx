@@ -81,7 +81,7 @@ function Option({
   )
 }
 
-/** The AI Route Optimization decision (demo2): current vs proposed, countdown, three actions. */
+/** The AI Route Optimization decision: current vs proposed, countdown, three actions. */
 export function HitlModal({
   pending,
   active,
