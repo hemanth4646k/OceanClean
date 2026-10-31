@@ -1,4 +1,4 @@
-# 01 Compose + thin pipe: sim → ingestion → Kafka → Spark → PostGIS
+# 01 (M1) Compose + thin pipe: sim → ingestion → Kafka → Spark → PostGIS
 Status: done
 Blocked by: none
 Estimate: 3 h
@@ -21,3 +21,5 @@ Spec: ../spec.md (Telemetry contract, Components)
 ## Comments
 
 2026-10-31: Done. Verified: vessel_state seq 252 → 258 within 6 s; topic `telemetry` has 6 partitions; 10 contract tests pass. Fixes along the way: PySpark 3.5 has no `StructType.fromDDL` (pass the DDL string to `from_json`); the checkpoint volume needed uid 1001 ownership. Not yet verified: a cold start from empty volumes (deleting volumes needs user approval).
+
+2026-10-31: `/code-review` of e61bbd0 found issues, fixed in `02-m1-review-fixes.md`. Most important: the watermark dedup in `build()` drops late events (see ADR-0005). The "Do" bullet above that says "watermark 10 min … dedup" is superseded.

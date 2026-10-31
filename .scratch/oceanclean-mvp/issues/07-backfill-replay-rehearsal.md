@@ -1,6 +1,6 @@
-# 06 Backfill burst, time-slider replay, rehearsal
+# 07 (M6) Backfill burst, time-slider replay, rehearsal
 Status: open
-Blocked by: 05
+Blocked by: 06
 Estimate: 2 h
 
 ## Do

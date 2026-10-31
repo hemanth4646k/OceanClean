@@ -1,6 +1,6 @@
-# 04 API + live map (core demo story)
+# 05 (M4) API + live map (core demo story)
 Status: open
-Blocked by: 03
+Blocked by: 04
 Estimate: 4 h
 
 ## Do

@@ -40,7 +40,7 @@ Status: approved (grilling session 2026-10-31). Demo: live demo + presentation, 
 ```
 
 - `event_ts`: ISO-8601 UTC, sim time. All windows and watermarks use it.
-- Dedup key: `(vessel_id, seq)`.
+- Dedup key: `(vessel_id, seq)`: in-batch in streaming, full dedup in the batch silver job (ADR-0005).
 - `buffered`: true for events replayed from the offline queue.
 - Ingestion derives `zone` = 5° cell id (e.g. `N35W145`); Kafka key = `vessel_id|zone`.
 - Longitude −180..180 everywhere outside the raw SCUD files (raw is 0–360).
@@ -54,7 +54,7 @@ Status: approved (grilling session 2026-10-31). Demo: live demo + presentation, 
 | `common/` | telemetry contract, geo helpers, zone function |
 | `simulator/` | sim clock, vessel physics + fuel model, debris world (patches advected by currents), offline buffer, route follower, loiter, `--fast-forward 30d` backfill |
 | `ingestion/` | FastAPI `POST /telemetry` (single + batch) → Kafka `telemetry` (6 partitions); `debris_survey` topic |
-| `streaming/` | Spark Structured Streaming: watermark 10 min (event time), checkpoint on MinIO/local volume, dedup, `foreachBatch` dual write (PostGIS UPSERT + bronze/silver Parquet), 5-min windows, z-score fuel anomaly, recalc gate → routing |
+| `streaming/` | Spark Structured Streaming, checkpoint on a local volume. Main query has **no watermark** (ADR-0005): `foreachBatch` writes every event, with in-batch dedup on `(vessel_id, seq)`, as a dual write (guarded PostGIS UPSERT + bronze Parquet). A separate windowed query (watermark, 5-min windows) feeds the z-score fuel anomaly. Recalc gate → routing |
 | `batch/` | `fetch_currents.py`, `fetch_microplastics.py` (API → bronze + cache), PySpark ETL: currents grid (silver), climatology + divergence hotspots (gold), hotspot × microplastics join (gold), telemetry gold aggregates |
 | `routing/` | pure Python: bilinear u/v interpolation, RK2 advection, intercept bisection, energy model, greedy 3-target chain, 2 km deviation gate |
 | `api/` | FastAPI REST + WebSocket `/ws` (vessel state, route proposals, alerts, sim clock); operator actions `POST /routes/{id}/accept|reject|modify` |
@@ -77,4 +77,4 @@ Fleet, auth, real hardware, mobile layouts, Iceberg, 3D, live tiles.
 
 ## Milestones
 
-See `issues/01..06`. Cut order if late: time-slider replay → anomaly alert → Analytics tab.
+See `issues/01..07` (02 = M1.5 review fixes; M2..M6 = issues 03..07). Cut order if late: time-slider replay → anomaly alert → Analytics tab.

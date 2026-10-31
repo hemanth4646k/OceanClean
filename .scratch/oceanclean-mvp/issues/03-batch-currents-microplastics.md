@@ -1,6 +1,6 @@
-# 02 Batch: currents + microplastics → lake → hotspots
+# 03 (M2) Batch: currents + microplastics → lake → hotspots
 Status: open
-Blocked by: 01
+Blocked by: 02
 Estimate: 4 h
 
 ## Do
@@ -29,6 +29,3 @@ Estimate: 4 h
 - Query endpoint: `https://services2.arcgis.com/C8EMgrsFcRFL6LrL/arcgis/rest/services/Marine_Microplastics_WGS84/FeatureServer/0/query`
 - Gyre envelope: `geometry=-180,20,-130,45&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects` → **2,315 records** (22,530 total). Page with `resultOffset`/`resultRecordCount`, `outFields=*`, `f=json`.
 - Useful fields: `Latitude__degree_`, `Longitude_degree_`, `Medium` (filter `Ocean water`), `Sampling_Method` (mostly `Neuston net`), `Microplastics_measurement`, `Unit` (e.g. `pieces/m3`; **units vary, so normalise or filter to one unit**), `Concentration_class_text`, `Date_m_d_yyyy` (epoch ms), `Short_Reference`, `DOI`, `ORGANIZATION`.
-
-**Carry-over fix from M1**
-- The Postgres credentials appear in both `.env` and `PG_DSN` in `infra/docker-compose.yml` (spark-stream). Build the DSN from `POSTGRES_*` env vars in code (or Compose interpolation) so there's one source.

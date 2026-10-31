@@ -14,7 +14,7 @@ Copernicus/NOAA NetCDF/GRIB ─► PySpark batch ETL ─► u/v drift grid (Parq
 PostGIS + drift grid ─► route optimizer (threshold-gated recalc) ─► waypoints ─► PostGIS ─► REST + WebSocket ─► React UI
 ```
 
-- **Speed layer**: Spark Structured Streaming, event-time watermarks for out-of-order data, checkpointing mandatory.
+- **Speed layer**: Spark Structured Streaming, checkpointing mandatory. Watermarks bound **only** windowed aggregations; the lake and live-state sinks receive every event, late or not (ADR-0005).
 - **Batch layer**: PySpark ETL, interpolate `u`/`v` vectors onto a standard grid.
 - **Dual write**: PostGIS = mutable live state; lake = immutable history. Never update lake rows in place.
 - **Recalc gate**: heavy route recompute only when drift deviation exceeds a threshold (SRS §3.3). Target SLA < 60 s for a local grid.
@@ -44,7 +44,7 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 
 ## Status
 
-Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..06`; decisions in `docs/adr/0001..0004`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). Next: M2 (`issues/02`).
+Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0005`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works); `/code-review` found issues. Next: **M1.5 review fixes (`issues/02`)**, then M2 (`issues/03`).
 
 ## Environment (dev machine)
 
@@ -58,7 +58,7 @@ All from the repo root. First time: `cp .env.example .env`.
 docker compose -f infra/docker-compose.yml up -d --build      # whole stack
 docker compose -f infra/docker-compose.yml logs -f spark-stream
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select seq, event_ts, lat, lon from vessel_state"
-docker run --rm -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint
+docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint
 ```
 
 The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image. Ports: ingestion 8001, PostGIS 5433, MinIO 9000/9001, Kafka 29092 (host), Spark UI 4040.
@@ -71,13 +71,36 @@ The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image.
 - Config and secrets via env vars; commit `.env.example`, never `.env`. Large data (`*.nc`, `*.parquet`) is gitignored.
 - Everything must run locally via Docker Compose with no cloud account.
 - Tests with `/tdd`: favor pure-function tests (drift advection, intercept math, threshold gate) and Spark tests on small local fixtures. Don't mock Kafka or Postgres when a Compose container works.
-- Python: type hints, `ruff`. Frontend: TypeScript strict.
+- Python: type hints on every function, including return types and test parameters. `ruff`. Frontend: TypeScript strict.
+
+### Streaming and data rules (from the M1 review)
+
+- Never put a watermark-based operator (`dropDuplicatesWithinWatermark`, windowed aggregations) upstream of the lake or live-state sinks: Spark silently drops rows older than the watermark. Offline-buffer flushes and the `--fast-forward` backfill are late by design. History dedup happens in the batch silver job on `(vessel_id, seq)`; live state relies on the guarded UPSERT (`WHERE stored.event_ts < new.event_ts`).
+- Watermarks and windows are in **sim time**. At `SIM_RATE=60`, 10 sim-minutes is 10 real seconds; size them with that in mind.
+- Never set `failOnDataLoss=false`; data loss must fail loudly.
+- Producers must confirm delivery: register a delivery callback and check `flush()`'s return value. Return 2xx only for events the broker acknowledged; otherwise 503.
+- Timestamps are timezone-aware UTC end to end. Set `TZ=UTC` on every container and convert Spark `collect()` results explicitly; never rely on container defaults.
+- No credential or connection literals in code or Compose. Build DSNs from `POSTGRES_*`/`MINIO_*` env vars, and give each setting exactly one default (in `.env.example`).
+- Contract changes need a test that checks names **and types** across pydantic, `SPARK_DDL` and `infra/postgres/init.sql`, plus one test that parses producer JSON with `from_json(SPARK_DDL)`.
+- Producers must keep `seq` and the sim clock monotonic across restarts (persist edge state); otherwise dedup drops and the UPSERT guard rejects the new events.
+
+### Pitfalls (learned the hard way; don't repeat)
+
+- PySpark is **3.5**: check an API exists in 3.5 before using it. `StructType.fromDDL` is 4.0-only; pass the DDL string to `from_json`.
+- Containers run as non-root (Spark is uid 1001). Create every directory a volume mounts onto in the Dockerfile with the right owner; a named volume copies ownership only on first creation.
+- In Dockerfiles, never `chmod`/`chown` files that come from a base layer: Docker copies them all into a new layer. That once added 900 MB to the Spark image. Touch only files you added.
+- Disk is tight (about 10 GB free). Run `docker system df` after builds; prune build cache and dangling images, not tagged base images.
+- Run tool containers with `-u "$(id -u)" -e HOME=/tmp`; running as root leaves root-owned caches in the repo.
+- Wait on async pipelines with a Monitor until-loop that also exits on the first error in the logs, not with fixed sleeps.
+- Update ticket status and CLAUDE.md in the **same commit** as the code they describe, not ahead of it.
 
 ## Agent skills
 
 Intended flow: `/grill-with-docs` -> `/to-spec` -> `/to-tickets` -> `/implement` (drives `/tdd`, closes with `/code-review`). Hard bugs: `/diagnosing-bugs`. Unsure which skill: `/ask-matt`.
 
-Installed globally: `grill-me`, `tdd`, `code-review`, `diagnosing-bugs`, `handoff`, `pr`, `research`, `teach`, `ask-matt`. NOT installed: `grill-with-docs`, `to-spec`, `to-tickets`, `implement`, `triage`, `wayfinder`. Until they are, use `/grill-me` to sharpen, write spec/tickets by hand under `.scratch/`, and build with `/tdd`.
+Per-ticket loop: `/clear` → "implement `.scratch/oceanclean-mvp/issues/NN-*.md`" → `/tdd` for pure logic, run the stack for glue → `/code-review` since the ticket's starting commit → set `Status: done` + a comment → commit.
+
+Installed globally: `grill-me` (broken: it calls a `grilling` skill that isn't installed; run the interview directly), `tdd`, `code-review`, `diagnosing-bugs`, `handoff`, `pr`, `research`, `teach`, `ask-matt`. NOT installed: `grill-with-docs`, `to-spec`, `to-tickets`, `implement`, `triage`, `wayfinder`. Until they are, use `/grill-me` to sharpen, write spec/tickets by hand under `.scratch/`, and build with `/tdd`.
 
 ### Delegating to Gemini CLI
 
