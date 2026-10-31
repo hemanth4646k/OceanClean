@@ -30,6 +30,7 @@ Out of scope: fleet orchestration, physical hardware. Single vessel only.
 
 ```
 infra/        docker-compose.yml, service configs
+common/       shared telemetry contract, geo/zone helpers
 simulator/    synthetic vessel + offline-queue telemetry producers
 ingestion/    ingestion endpoint -> Kafka
 streaming/    Spark Structured Streaming jobs
@@ -43,7 +44,7 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 
 ## Status
 
-Setup only, no application code yet. Done: SRS, UI mood images, this file, skill/issue-tracker config, git repo (`main`), Gemini CLI. Next: `/grill-me` on the first vertical slice (simulator -> Kafka -> Spark -> PostGIS), then spec and tickets in `.scratch/<feature>/`. First open decisions: telemetry schema, Compose service set, Spark/Java versions, Iceberg vs plain Parquet, route-optimizer algorithm.
+Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..06`; decisions in `docs/adr/0001..0004`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). Next: M2 (`issues/02`).
 
 ## Environment (dev machine)
 
@@ -51,7 +52,16 @@ Docker 29, Node 26, Python 3.10, Java 22. `uv` and `ripgrep` not installed. Spar
 
 ## Commands
 
-None established yet. When you add the first working command (compose up, test, lint, run job), record the exact invocation here. Do not guess commands in the meantime.
+All from the repo root. First time: `cp .env.example .env`.
+
+```
+docker compose -f infra/docker-compose.yml up -d --build      # whole stack
+docker compose -f infra/docker-compose.yml logs -f spark-stream
+docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select seq, event_ts, lat, lon from vessel_state"
+docker run --rm -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint
+```
+
+The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image. Ports: ingestion 8001, PostGIS 5433, MinIO 9000/9001, Kafka 29092 (host), Spark UI 4040.
 
 ## Conventions
 
