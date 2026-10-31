@@ -44,7 +44,7 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 
 ## Status
 
-Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0005`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works); `/code-review` found issues. Next: **M1.5 review fixes (`issues/02`)**, then M2 (`issues/03`).
+Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0005`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. Next: **M2 (`issues/03`)**.
 
 ## Environment (dev machine)
 
@@ -52,13 +52,14 @@ Docker 29, Node 26, Python 3.10, Java 22. `uv` and `ripgrep` not installed. Spar
 
 ## Commands
 
-All from the repo root. First time: `cp .env.example .env`.
+All from the repo root. Compose reads `.env.example` (the only defaults); create a `.env` only to override values.
 
 ```
 docker compose -f infra/docker-compose.yml up -d --build      # whole stack
 docker compose -f infra/docker-compose.yml logs -f spark-stream
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select seq, event_ts, lat, lon from vessel_state"
 docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint
+docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app --entrypoint python oceanclean-spark -m pytest -q -p no:cacheprovider tests/test_stream_spark.py   # Spark fixture tests (skipped in the py image)
 ```
 
 The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image. Ports: ingestion 8001, PostGIS 5433, MinIO 9000/9001, Kafka 29092 (host), Spark UI 4040.
@@ -80,7 +81,7 @@ The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image.
 - Never set `failOnDataLoss=false`; data loss must fail loudly.
 - Producers must confirm delivery: register a delivery callback and check `flush()`'s return value. Return 2xx only for events the broker acknowledged; otherwise 503.
 - Timestamps are timezone-aware UTC end to end. Set `TZ=UTC` on every container and convert Spark `collect()` results explicitly; never rely on container defaults.
-- No credential or connection literals in code or Compose. Build DSNs from `POSTGRES_*`/`MINIO_*` env vars, and give each setting exactly one default (in `.env.example`).
+- No credential or connection literals in code or Compose. Build DSNs from `POSTGRES_*`/`MINIO_*` env vars (`oceanclean_common.settings.pg_dsn`), and give each setting exactly one default, in `.env.example`. Read settings with `os.environ[...]`, never `.get(name, default)`, and read them inside `main()`/lifespan rather than at import, so tests can import the module. `tests/test_settings.py` checks the first two rules.
 - Contract changes need a test that checks names **and types** across pydantic, `SPARK_DDL` and `infra/postgres/init.sql`, plus one test that parses producer JSON with `from_json(SPARK_DDL)`.
 - Producers must keep `seq` and the sim clock monotonic across restarts (persist edge state); otherwise dedup drops and the UPSERT guard rejects the new events.
 

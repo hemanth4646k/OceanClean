@@ -4,41 +4,40 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from confluent_kafka import Producer
+from confluent_kafka import KafkaError, Message, Producer
 from confluent_kafka.admin import AdminClient, NewTopic
 from fastapi import FastAPI, HTTPException
 from oceanclean_common.telemetry import TELEMETRY_TOPIC, Telemetry, kafka_key
 
-log = logging.getLogger("ingestion")
-BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
-PARTITIONS = int(os.environ.get("TELEMETRY_PARTITIONS", "6"))
+log = logging.getLogger("uvicorn.error")
+# Below the simulator's 5 s HTTP timeout, so a stuck broker surfaces as 503, not a client timeout.
+FLUSH_TIMEOUT_S = 3.0
 
 producer: Producer | None = None
 
 
-def ensure_topics() -> None:
-    admin = AdminClient({"bootstrap.servers": BOOTSTRAP})
-    existing = admin.list_topics(timeout=10).topics
-    new = [
-        NewTopic(t, num_partitions=PARTITIONS, replication_factor=1)
-        for t in (TELEMETRY_TOPIC,)
-        if t not in existing
-    ]
-    for topic, fut in admin.create_topics(new).items() if new else []:
-        fut.result()
-        log.info("created topic %s with %d partitions", topic, PARTITIONS)
+def ensure_topic(bootstrap: str, partitions: int) -> None:
+    admin = AdminClient({"bootstrap.servers": bootstrap})
+    if TELEMETRY_TOPIC in admin.list_topics(timeout=10).topics:
+        return
+    topic = NewTopic(TELEMETRY_TOPIC, num_partitions=partitions, replication_factor=1)
+    admin.create_topics([topic])[TELEMETRY_TOPIC].result()
+    log.info("created topic %s with %d partitions", TELEMETRY_TOPIC, partitions)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     global producer
-    ensure_topics()
-    # acks=all + idempotence: burst ingestion without loss or duplicates (SRS 4.1).
+    bootstrap = os.environ["KAFKA_BOOTSTRAP"]
+    ensure_topic(bootstrap, int(os.environ["TELEMETRY_PARTITIONS"]))
+    # acks=all + idempotence: producer retries never duplicate or reorder (SRS 4.1).
+    # ingest() answers 202 only for events the broker acknowledged.
     producer = Producer(
         {
-            "bootstrap.servers": BOOTSTRAP,
+            "bootstrap.servers": bootstrap,
             "acks": "all",
             "enable.idempotence": True,
             "linger.ms": 20,
@@ -62,12 +61,31 @@ def health() -> dict[str, str]:
 def ingest(payload: Telemetry | list[Telemetry]) -> dict[str, int]:
     assert producer is not None
     events = payload if isinstance(payload, list) else [payload]
+    reports: list[KafkaError | None] = []
+
+    def on_delivery(err: KafkaError | None, _msg: Message) -> None:
+        reports.append(err)
+
     for t in events:
         try:
-            producer.produce(TELEMETRY_TOPIC, key=kafka_key(t), value=t.to_json())
+            producer.produce(
+                TELEMETRY_TOPIC, key=kafka_key(t), value=t.to_json(), on_delivery=on_delivery
+            )
         except BufferError as e:
-            producer.flush(5)
             raise HTTPException(503, "broker backpressure, retry") from e
         producer.poll(0)
-    producer.flush(10)
+    still_queued = producer.flush(FLUSH_TIMEOUT_S)
+    errors = [e for e in reports if e is not None]
+    acked = len(reports) - len(errors)
+    if still_queued or errors or acked != len(events):
+        # Unacked events may still be delivered later; a client retry duplicates them, which
+        # (vessel_id, seq) dedup absorbs. Losing them silently would not be absorbed.
+        log.warning(
+            "kafka acked %d/%d events (%d queued, errors: %s)",
+            acked,
+            len(events),
+            still_queued,
+            errors[:3],
+        )
+        raise HTTPException(503, f"kafka acknowledged {acked}/{len(events)} events, retry")
     return {"accepted": len(events)}

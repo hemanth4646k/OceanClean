@@ -1,9 +1,28 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
-from oceanclean_common.telemetry import SPARK_DDL, Telemetry, kafka_key, zone_of
+from oceanclean_common.telemetry import (
+    SPARK_COLUMNS,
+    SPARK_DDL,
+    SPARK_FIELDS,
+    Telemetry,
+    kafka_key,
+    zone_of,
+)
 from pydantic import ValidationError
+
+INIT_SQL = Path(__file__).resolve().parents[1] / "infra" / "postgres" / "init.sql"
+SPARK_TYPE = {str: "STRING", datetime: "TIMESTAMP", int: "BIGINT", float: "DOUBLE", bool: "BOOLEAN"}
+PG_TYPE = {
+    str: "TEXT",
+    datetime: "TIMESTAMPTZ",
+    int: "BIGINT",
+    float: "DOUBLE PRECISION",
+    bool: "BOOLEAN",
+}
 
 SAMPLE = {
     "vessel_id": "OC-01",
@@ -55,6 +74,28 @@ def test_utc_offset_zero_accepted() -> None:
     assert Telemetry.model_validate({**SAMPLE, "event_ts": ts}).event_ts == ts
 
 
-def test_spark_ddl_matches_model_fields() -> None:
-    ddl_names = [col.strip().split()[0] for col in SPARK_DDL.split(",")]
-    assert ddl_names == list(Telemetry.model_fields)
+def vessel_state_columns() -> dict[str, str]:
+    """Column name -> SQL type of vessel_state, constraints stripped."""
+    m = re.search(
+        r"CREATE TABLE IF NOT EXISTS vessel_state \((.*?)\n\);", INIT_SQL.read_text(), re.S
+    )
+    assert m, "vessel_state table not found in init.sql"
+    cols = {}
+    for line in m.group(1).strip().splitlines():
+        name, rest = line.strip().rstrip(",").split(None, 1)
+        cols[name] = re.split(r"\s+(?:NOT NULL|NULL|PRIMARY KEY|DEFAULT)\b", rest)[0]
+    return cols
+
+
+def test_spark_schema_matches_model_names_and_types() -> None:
+    expected = [(name, SPARK_TYPE[f.annotation]) for name, f in Telemetry.model_fields.items()]
+    assert list(SPARK_FIELDS) == expected
+    assert list(SPARK_COLUMNS) == list(Telemetry.model_fields)
+    assert SPARK_DDL == ", ".join(f"{n} {t}" for n, t in expected)
+
+
+def test_vessel_state_has_every_contract_column_with_matching_type() -> None:
+    cols = vessel_state_columns()
+    for name, f in Telemetry.model_fields.items():
+        assert name in cols, f"vessel_state lacks contract column {name}"
+        assert cols[name] == PG_TYPE[f.annotation], f"{name}: {cols[name]}"

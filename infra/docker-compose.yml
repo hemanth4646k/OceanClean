@@ -1,15 +1,29 @@
 name: oceanclean
 
+# Every container runs in UTC so timestamps never depend on host defaults.
+x-utc: &utc
+  TZ: UTC
+
+# .env.example holds every setting's only default; an optional .env overrides it.
+x-env: &env
+  env_file:
+    - path: ../.env.example
+    - path: ../.env
+      required: false
+  environment: *utc
+  restart: unless-stopped
+
 x-py: &py
+  <<: *env
   image: oceanclean-py
   build: { context: .., dockerfile: infra/docker/python.Dockerfile }
-  env_file: ../.env
-  restart: unless-stopped
 
 services:
   kafka:
     image: apache/kafka:3.7.2
+    # No env_file: the image turns every KAFKA_* variable into a broker property.
     environment:
+      <<: *utc
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
@@ -21,7 +35,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 6
+      # Ingestion creates the topic with TELEMETRY_PARTITIONS; never auto-create it with 1.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_LOG_RETENTION_HOURS: 72
       KAFKA_HEAP_OPTS: -Xmx512m -Xms512m
@@ -36,8 +51,8 @@ services:
     restart: unless-stopped
 
   postgis:
+    <<: *env
     image: postgis/postgis:16-3.4-alpine
-    env_file: ../.env
     ports: ["5433:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -47,16 +62,14 @@ services:
       interval: 3s
       retries: 30
     mem_limit: 512m
-    restart: unless-stopped
 
   minio:
+    <<: *env
     image: cgr.dev/chainguard/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
-    env_file: ../.env
     ports: ["9000:9000", "9001:9001"]
     volumes: [minio-data:/data]
     mem_limit: 512m
-    restart: unless-stopped
 
   minio-init:
     <<: *py
@@ -67,7 +80,6 @@ services:
   ingestion:
     <<: *py
     command: uvicorn ingestion_app:app --host 0.0.0.0 --port 8000
-    environment: { KAFKA_BOOTSTRAP: "kafka:9092" }
     ports: ["8001:8000"]
     depends_on: { kafka: { condition: service_healthy } }
     healthcheck:
@@ -79,22 +91,18 @@ services:
   simulator:
     <<: *py
     command: python simulator/sim_main.py
-    environment: { INGEST_URL: "http://ingestion:8000/telemetry", SIM_STATE_FILE: /state/OC-01.json }
     volumes: [sim-state:/state]
     depends_on: { ingestion: { condition: service_healthy } }
     mem_limit: 256m
 
   spark-stream:
+    <<: *env
     image: oceanclean-spark
     build: { context: .., dockerfile: infra/docker/spark.Dockerfile }
-    env_file: ../.env
-    environment:
-      KAFKA_BOOTSTRAP: kafka:9092
-      PG_DSN: postgresql://ocean:ocean@postgis:5432/oceanclean
-      CHECKPOINT_DIR: /checkpoints/telemetry
     command: >
       /opt/bitnami/spark/bin/spark-submit --master local[2] --driver-memory 1g
-      --conf spark.ui.port=4040 /app/streaming/telemetry_stream.py
+      --conf spark.ui.port=4040 --conf spark.driver.extraJavaOptions=-Duser.timezone=UTC
+      /app/streaming/telemetry_stream.py
     volumes:
       - ../common:/app/common:ro
       - ../streaming:/app/streaming:ro
@@ -107,7 +115,6 @@ services:
       postgis: { condition: service_healthy }
       ingestion: { condition: service_healthy }
     mem_limit: 2g
-    restart: unless-stopped
 
 volumes:
   kafka-data:

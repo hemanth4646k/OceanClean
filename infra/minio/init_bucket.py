@@ -6,12 +6,12 @@ import time
 from minio import Minio
 
 client = Minio(
-    os.environ.get("MINIO_ENDPOINT", "minio:9000"),
+    os.environ["MINIO_ENDPOINT"],
     access_key=os.environ["MINIO_ROOT_USER"],
     secret_key=os.environ["MINIO_ROOT_PASSWORD"],
     secure=False,
 )
-bucket = os.environ.get("LAKE_BUCKET", "oceanclean")
+bucket = os.environ["LAKE_BUCKET"]
 for _ in range(30):
     try:
         if not client.bucket_exists(bucket):

@@ -15,9 +15,9 @@ from pathlib import Path
 from vessel import VesselState
 
 
-def save(path: Path, clock_now: datetime, v: VesselState) -> None:
+def save(path: Path, next_tick: datetime, v: VesselState) -> None:
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"clock_now": clock_now.isoformat(), "vessel": asdict(v)}))
+    tmp.write_text(json.dumps({"next_tick": next_tick.isoformat(), "vessel": asdict(v)}))
     os.replace(tmp, path)  # atomic: a crash never leaves a half-written file
 
 
@@ -25,4 +25,6 @@ def load(path: Path) -> tuple[datetime, VesselState] | None:
     if not path.exists():
         return None
     d = json.loads(path.read_text())
-    return datetime.fromisoformat(d["clock_now"]), VesselState(**d["vessel"])
+    # "clock_now" is the pre-M1.5 name for the same value (the next tick's sim time).
+    next_tick = d["next_tick"] if "next_tick" in d else d["clock_now"]
+    return datetime.fromisoformat(next_tick), VesselState(**d["vessel"])

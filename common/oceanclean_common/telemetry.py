@@ -11,13 +11,24 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
 
-# Spark schema as DDL so this module does not import pyspark.
-# Order and names must match Telemetry below (enforced by tests).
-SPARK_DDL = (
-    "vessel_id STRING, event_ts TIMESTAMP, seq BIGINT, lat DOUBLE, lon DOUBLE, "
-    "heading_deg DOUBLE, speed_kn DOUBLE, battery_pct DOUBLE, fuel_l DOUBLE, "
-    "debris_density DOUBLE, hold_fill_pct DOUBLE, buffered BOOLEAN"
+# Spark schema as (name, DDL type) so this module does not import pyspark.
+# Order, names and types must match Telemetry below (enforced by tests).
+SPARK_FIELDS: tuple[tuple[str, str], ...] = (
+    ("vessel_id", "STRING"),
+    ("event_ts", "TIMESTAMP"),
+    ("seq", "BIGINT"),
+    ("lat", "DOUBLE"),
+    ("lon", "DOUBLE"),
+    ("heading_deg", "DOUBLE"),
+    ("speed_kn", "DOUBLE"),
+    ("battery_pct", "DOUBLE"),
+    ("fuel_l", "DOUBLE"),
+    ("debris_density", "DOUBLE"),
+    ("hold_fill_pct", "DOUBLE"),
+    ("buffered", "BOOLEAN"),
 )
+SPARK_COLUMNS: tuple[str, ...] = tuple(name for name, _ in SPARK_FIELDS)
+SPARK_DDL = ", ".join(f"{name} {typ}" for name, typ in SPARK_FIELDS)
 
 TELEMETRY_TOPIC = "telemetry"
 ZONE_DEG = 5

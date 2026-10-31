@@ -1,5 +1,5 @@
 # 02 (M1.5) Fix the M1 code-review findings
-Status: open
+Status: done
 Blocked by: 01
 Estimate: 45 min
 
@@ -72,3 +72,17 @@ Work test-first (`/tdd`) where a pure function exists; otherwise verify against 
 - **No credential literals:** `grep -rn "ocean:ocean" infra/ streaming/ ingestion/` finds nothing.
 - **Cold start:** **ask the user before** running `docker compose -f infra/docker-compose.yml down -v`, which deletes this project's volumes. Once they agree, run it, then `up -d --build`; within 2 minutes `vessel_state` updates. This was blocked in M1.
 - Update this ticket's Status, add a Comments entry and update CLAUDE.md Status **in the same commit** as the fixes. Then run `/code-review` since `e61bbd0`.
+
+## Comments
+
+2026-10-31: Done. Verified on a cold start (`down -v`, approved by the user, then `up -d --build`): `vessel_state` populated 10 s after `up` returned. Late-event proof: a new seq 2 sim-hours older than live state was logged as "1 not newer than live state" in batch 18 and left `vessel_state` untouched; a same-seq pair POSTed together was logged as "1 duplicate (vessel_id, seq) dropped" in batch 21. Ack proof: with Kafka stopped, `POST /telemetry` returned 503 ("kafka acknowledged 0/1 events") after 3.0 s; after `start kafka` live state advanced again within 7 s. `grep -rn "ocean:ocean" infra/ streaming/ ingestion/` is empty. 18 Python tests and 5 Spark fixture tests pass (the Spark tests also pass under `TZ=Asia/Kolkata`); ruff passes with `ANN`.
+
+Decisions along the way:
+- Every setting's only default is in `.env.example`. Compose loads it, then an optional `.env`; code uses `os.environ[...]` with no fallbacks. `tests/test_settings.py` fails if code reads a setting that's missing from `.env.example` or adds a second default via `.get()`.
+- The contract is one `SPARK_FIELDS` tuple of (name, type); `SPARK_DDL` and `SPARK_COLUMNS` are derived from it.
+- Kafka auto-create is disabled and `KAFKA_NUM_PARTITIONS` removed: ingestion creates the topic with `TELEMETRY_PARTITIONS`, so an auto-created topic can't silently get 1 partition.
+- Kafka gets no `env_file`, because the image turns every `KAFKA_*` variable into a broker property.
+- The flush timeout is 3 s, below the simulator's 5 s HTTP timeout, so the simulator sees a 503 and not a client timeout. The simulator now logs non-2xx responses (`raise_for_status`), but it still drops the tick: the offline buffer is ticket 04 work.
+- Python's naive `collect()` datetimes are converted with `astimezone(timezone.utc)`, which is correct in any process timezone (`replace(tzinfo=utc)` would be off by the local offset).
+- Spark image: added pytest, plus `pyspark`/`py4j` on `PYTHONPATH` (ENV only). The test fixture sets `spark.jars.ivy=/tmp/.ivy2`, because the host uid has no passwd entry and the JVM home falls back to `?`.
+- Not verified: Compose with no `.env` file at all. A permission rule blocks moving `.env`; `docker compose config` resolves with the optional entry, which Compose 2.40 supports.
