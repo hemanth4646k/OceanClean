@@ -46,6 +46,13 @@ const initial: LiveState = {
   alerts: [],
 }
 
+/** The newest 3 warnings (they stay until dismissed) and the newest 4 other alerts. */
+function keepAlerts(all: LiveState['alerts']): LiveState['alerts'] {
+  const warn = all.filter((x) => x.level === 'warn').slice(-3)
+  const rest = all.filter((x) => x.level !== 'warn').slice(-4)
+  return [...warn, ...rest].sort((x, y) => x.id - y.id)
+}
+
 /** Append the new position; a sim time earlier than the last one is a clean sim start. */
 function extendWake(state: LiveState, v: Vessel | null): LatLon[] {
   if (!v) return state.wake
@@ -76,7 +83,7 @@ function reduce(state: LiveState, a: Action): LiveState {
     case 'local-routes':
       return { ...state, routes: { ...state.routes, ...a.data } }
     case 'alert':
-      return { ...state, alerts: [...state.alerts, { ...a.data, id: ++alertId }].slice(-5) }
+      return { ...state, alerts: keepAlerts([...state.alerts, { ...a.data, id: ++alertId }]) }
     case 'dismiss':
       return { ...state, alerts: state.alerts.filter((x) => x.id !== a.id) }
   }

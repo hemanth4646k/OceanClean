@@ -139,3 +139,9 @@ Left open (judgement calls):
 - **Copied constants in the web.** `FUEL_TANK_L` and the "2 km" text copy simulator/gate constants, adding to the open TS-types contract item from ticket 05.
 - **`decided_by` and `reason`** are bare strings, not enums (as with route statuses in tickets 04 and 05).
 
+2026-10-31 (follow-up, from the user's manual check) — The leak test "did nothing" for the user. In fact it raised two `fuel_anomaly` alerts, but at 2 h/s a 6 sim-h leak lasts 3 real seconds, and toasts vanished after 6 s. Changes:
+
+- **Warnings stay up.** Warning toasts (fuel anomaly, expiry) stay until clicked, and the feed keeps the 3 newest.
+- **Metrics tab.** `/metrics` returns the 8 newest alerts. The tab shows a "Recent alerts" list, and the fault card shows the last anomaly. Metric lines now break where there were no batches (clock paused) instead of bridging the gap.
+- **Automatic analytics.** A new Compose service `analytics` (no profile, so it starts with `up -d`) reruns `telemetry_etl.py` every `ANALYTICS_REFRESH_S` (180 s). Each run is a fresh JVM, so memory is free between runs. A run with no bronze yet (fresh volume, just after a reset) exits cleanly. `reset_sim.sh` stops the service so it cannot rebuild silver/gold from the old run. The manual `telemetry-etl` profile service remains for an immediate refresh.
+

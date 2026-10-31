@@ -187,6 +187,11 @@ def new_alerts(conn: psycopg.Connection, after_id: int) -> list[dict]:
     return _all(conn, sql, [after_id])
 
 
+def recent_alerts(conn: psycopg.Connection, n: int) -> list[dict]:
+    """The newest `n` alerts, newest first (the Metrics tab's list)."""
+    return _all(conn, f"SELECT {ALERT_COLS} FROM alerts ORDER BY alert_id DESC LIMIT %s", [n])
+
+
 def last_alert_id(conn: psycopg.Connection) -> int:
     return conn.execute("SELECT coalesce(max(alert_id), 0) FROM alerts").fetchone()[0]
 

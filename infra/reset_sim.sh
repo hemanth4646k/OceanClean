@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 dc() { docker compose -f infra/docker-compose.yml "$@"; }
 psql_q() { dc exec -T postgis sh -c 'psql -qtA -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' _ "$1"; }
 
-dc stop simulator
+dc stop simulator analytics  # analytics would rebuild silver/gold from the old run
 # The stream must finish what the simulator already sent; otherwise those events land after
 # the truncate and their newer event times make the UPSERT reject the fresh run.
 echo "waiting for the stream to drain..."

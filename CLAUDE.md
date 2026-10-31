@@ -65,8 +65,10 @@ mkdir -p data/cache   # before the first fetch, or Docker creates it root-owned
 docker compose -f infra/docker-compose.yml --profile batch run --rm --build -u "$(id -u):$(id -g)" fetch
 docker compose -f infra/docker-compose.yml --profile batch run --rm spark-batch
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select dataset, source, fetched_at from data_sources"
-# Telemetry history (M5): bronze ticks -> silver (dedup, per-tick energy/debris) -> gold daily(+zone) -> analytics.json; rerun to refresh the Analytics tab.
+# Telemetry history (M5): bronze ticks -> silver (dedup, per-tick energy/debris) -> gold daily(+zone) -> analytics.json.
+# The `analytics` service (part of `up -d`) reruns it every ANALYTICS_REFRESH_S; run it by hand for an immediate refresh:
 docker compose -f infra/docker-compose.yml --profile batch run --rm telemetry-etl
+docker compose -f infra/docker-compose.yml logs --tail 5 analytics
 # Live map (M4): http://localhost:8080 (nginx, proxies /api and /ws to the API on :8002).
 (cd web && npm run dev)   # dev server on :5173 with the same proxy; `npm run build` = tsc + vite build
 curl -s localhost:8002/sim/clock; curl -s -XPOST localhost:8002/sim/clock -H 'content-type: application/json' -d '{"paused": false, "rate": 3600}'

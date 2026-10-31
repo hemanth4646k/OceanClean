@@ -192,6 +192,32 @@ services:
     mem_limit: 1536m
     restart: "no"
 
+  # The same job on a timer, so the Analytics tab stays current without manual runs. A fresh
+  # JVM per run keeps memory free between runs; reset_sim.sh stops it during a reset.
+  analytics:
+    <<: *env
+    image: oceanclean-spark
+    build: { context: .., dockerfile: infra/docker/spark.Dockerfile }
+    command:
+      - sh
+      - -c
+      - >-
+        while true; do
+        /opt/bitnami/spark/bin/spark-submit --master local[2] --driver-memory 1g
+        --conf spark.ui.enabled=false --conf spark.driver.extraJavaOptions=-Duser.timezone=UTC
+        /app/batch/telemetry_etl.py || echo "telemetry-etl run failed; retrying next cycle";
+        sleep "$$ANALYTICS_REFRESH_S";
+        done
+    volumes:
+      - ../common:/app/common:ro
+      - ../batch:/app/batch:ro
+      - ../routing:/app/routing:ro
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      postgis: { condition: service_healthy }
+    mem_limit: 1536m
+    restart: unless-stopped
+
 volumes:
   kafka-data:
   pgdata:

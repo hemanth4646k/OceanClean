@@ -26,6 +26,7 @@ from oceanclean_common.regions import (
 )
 from oceanclean_common.settings import lake_url, pg_dsn, s3a_conf
 from oceanclean_common.telemetry import SPARK_COLUMNS, ZONE_DEG
+from pyspark.errors import AnalysisException
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
@@ -119,10 +120,16 @@ def main() -> None:
     def url(key: str) -> str:
         return lake_url(env, key)
 
+    try:
+        bronze = spark.read.parquet(url(BRONZE_TELEMETRY))
+    except AnalysisException:  # a fresh volume or just after a sim reset: nothing to do yet
+        log.info("no bronze telemetry yet; nothing to aggregate")
+        spark.stop()
+        return
     # Silver is rebuilt from all of bronze: dedup and deltas need each vessel's whole history.
-    silver_telemetry(spark.read.parquet(url(BRONZE_TELEMETRY))).write.mode("overwrite").partitionBy(
-        "date"
-    ).parquet(url(SILVER_TELEMETRY))
+    silver_telemetry(bronze).write.mode("overwrite").partitionBy("date").parquet(
+        url(SILVER_TELEMETRY)
+    )
     silver = spark.read.parquet(url(SILVER_TELEMETRY)).cache()
     gold_daily = daily(silver).orderBy("date").cache()
     gold_zone = daily_zone(silver).orderBy("date", "zone").cache()

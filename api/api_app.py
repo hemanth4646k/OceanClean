@@ -403,14 +403,16 @@ def sim_fault(body: Fault) -> dict:
 
 @app.get("/metrics")
 def metrics(minutes: float = 15.0, hours: float = 48.0) -> dict:
-    """Admin view: stream query metrics over `minutes` of wall time, lake row counts, and the
-    last `hours` sim hours of energy, debris, fuel and battery from the 5-minute windows."""
+    """Admin view: stream query metrics over `minutes` of wall time, lake row counts, the
+    last `hours` sim hours of energy, debris, fuel and battery from the 5-minute windows, and
+    the newest alerts."""
     if not (1 <= minutes <= 24 * 60 and 1 <= hours <= 24 * 30):
         raise HTTPException(422, "minutes must be 1..1440 and hours 1..720")
     bucket_s = max(2, round(minutes * 60 / 150))  # about 150 points per chart
     with db() as conn:
         out = store.metrics_series(conn, minutes, bucket_s)
         out["hourly"] = store.hourly_windows(conn, app.state.vessel_id, hours)
+        out["alerts"] = store.recent_alerts(conn, 8)
     return {**out, "bucket_s": bucket_s}
 
 

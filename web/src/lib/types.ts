@@ -173,6 +173,16 @@ export interface Metrics {
   latest: QueryProgress[]
   lake: { dataset: string; rows: number; updated_at: string }[]
   hourly: HourWindow[]
+  alerts: StoredAlert[] // newest first
+}
+
+/** A row of the `alerts` table (stream-raised, e.g. fuel_anomaly); `ts` is sim time. */
+export interface StoredAlert {
+  alert_id: number
+  ts: string
+  kind: string
+  level: 'info' | 'success' | 'warn'
+  text: string
 }
 
 export interface Yield {

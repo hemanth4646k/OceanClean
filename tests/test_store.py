@@ -19,6 +19,7 @@ from store import (
     metrics_series,
     modify_route,
     new_alerts,
+    recent_alerts,
     reject_route,
     set_fuel_leak,
     set_hitl_hold,
@@ -224,3 +225,13 @@ def test_decision_counts_treat_unrecorded_deciders_as_the_operator(
         ("operator", "superseded", 1),
         ("timeout", "expired", 1),
     ]
+
+
+def test_recent_alerts_are_the_newest_first(conn: psycopg.Connection) -> None:
+    for i in range(4):
+        conn.execute(
+            "INSERT INTO alerts (alert_id, vessel_id, ts, kind, level, text)"
+            " VALUES (%s, 'OC-T', now() + %s * interval '1 min', 'fuel_anomaly', 'warn', 'x')",
+            [i + 1, i],
+        )
+    assert [a["alert_id"] for a in recent_alerts(conn, 3)] == [4, 3, 2]

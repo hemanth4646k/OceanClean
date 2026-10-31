@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { ChartCard, StatTile } from '@/charts/kit'
 import { SERIES, axisProps, fmt, gridProps, hhmm, tooltipProps, usePoll } from '@/charts/style'
 import { ms, postJSON } from '@/lib/api'
-import type { Metrics, MetricPoint, QueryName } from '@/lib/types'
+import type { Metrics, MetricPoint, QueryName, StoredAlert } from '@/lib/types'
 import { FUEL_TANK_L } from '@/lib/vessel'
 
 const QUERIES: { key: QueryName; label: string; color: string }[] = [
@@ -25,7 +25,14 @@ const QUERIES: { key: QueryName; label: string; color: string }[] = [
 type Wide = { t: number } & Partial<Record<QueryName, number | null>>
 
 /** Long rows (t, query, value) -> one row per bucket with a column per query. */
-function pivot(series: MetricPoint[], value: (p: MetricPoint) => number | null): Wide[] {
+/** Long rows (t, query, value) -> one row per bucket with a column per query. Buckets with no
+ * batches at all (stream stopped, clock paused) become null rows, so lines break at gaps
+ * instead of drawing a straight line across them. */
+function pivot(
+  series: MetricPoint[],
+  bucketS: number,
+  value: (p: MetricPoint) => number | null,
+): Wide[] {
   const by = new Map<number, Wide>()
   for (const p of series) {
     const t = ms(p.t)
@@ -33,7 +40,17 @@ function pivot(series: MetricPoint[], value: (p: MetricPoint) => number | null):
     row[p.query] = value(p)
     by.set(t, row)
   }
-  return [...by.values()].sort((a, b) => a.t - b.t)
+  const rows = [...by.values()].sort((a, b) => a.t - b.t)
+  const out: Wide[] = []
+  const step = bucketS * 1000
+  for (const r of rows) {
+    const prev = out.at(-1)
+    if (prev && r.t - prev.t > step) {
+      out.push({ t: prev.t + step, ...Object.fromEntries(QUERIES.map((q) => [q.key, null])) })
+    }
+    out.push(r)
+  }
+  return out
 }
 
 function QueryChart({
@@ -87,7 +104,7 @@ function QueryChart({
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4 }}
-              connectNulls
+              connectNulls={false}
               isAnimationActive={false}
             />
           ))}
@@ -97,7 +114,9 @@ function QueryChart({
   )
 }
 
-function FaultCard() {
+const simTime = (iso: string) => `${iso.slice(5, 16).replace('T', ' ')} UTC`
+
+function FaultCard({ latest }: { latest: StoredAlert | undefined }) {
   const [until, setUntil] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const inject = () => {
@@ -118,6 +137,11 @@ function FaultCard() {
           : '1.5× fuel for the same power. '}
         Shows only while the engine runs, not when loitering on battery.
       </p>
+      {latest && (
+        <p className="text-xs text-amber-300">
+          Last anomaly ({simTime(latest.ts)} sim): {latest.text.replace(/ on OC-\d+/, '')}
+        </p>
+      )}
     </section>
   )
 }
@@ -128,14 +152,14 @@ export function MetricsView() {
   if (!m) {
     return <p className="p-6 text-sm text-muted-foreground">{error ?? 'Loading metrics…'}</p>
   }
-  const rate = pivot(m.series, (p) => p.rows_per_s)
-  const duration = pivot(m.series, (p) => p.duration_ms)
+  const rate = pivot(m.series, m.bucket_s, (p) => p.rows_per_s)
+  const duration = pivot(m.series, m.bucket_s, (p) => p.duration_ms)
   // The newest bucket is still filling; tiles use complete buckets only.
   const tel = m.series.filter((p) => p.query === 'telemetry').slice(0, -1)
   const latest = Object.fromEntries(m.latest.map((q) => [q.query, q]))
   const lags = m.latest.map((q) => q.kafka_lag ?? 0)
   const lake = Object.fromEntries(m.lake.map((d) => [d.dataset, d.rows]))
-  const lagByBucket = [...pivot(m.series, (p) => p.kafka_lag).values()].map((r) =>
+  const lagByBucket = [...pivot(m.series, m.bucket_s, (p) => p.kafka_lag).values()].map((r) =>
     Math.max(0, ...QUERIES.map((q) => r[q.key] ?? 0)),
   )
 
@@ -195,7 +219,7 @@ export function MetricsView() {
             </>
           }
         />
-        <FaultCard />
+        <FaultCard latest={m.alerts.find((a) => a.kind === 'fuel_anomaly')} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <QueryChart
@@ -303,6 +327,25 @@ export function MetricsView() {
           </ResponsiveContainer>
         </ChartCard>
       </div>
+      <section className="rounded-xl border bg-card p-4">
+        <h3 className="mb-2 text-sm font-medium">Recent alerts</h3>
+        {m.alerts.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            None yet. Inject a fuel leak while the vessel is under way to raise one.
+          </p>
+        ) : (
+          <ul className="space-y-1 text-sm">
+            {m.alerts.map((a) => (
+              <li key={a.alert_id} className="flex gap-3">
+                <span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {simTime(a.ts)}
+                </span>
+                <span className={a.level === 'warn' ? 'text-amber-300' : ''}>{a.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   )
 }
