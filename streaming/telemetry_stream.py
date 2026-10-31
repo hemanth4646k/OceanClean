@@ -114,7 +114,9 @@ def read_kafka(spark: SparkSession, bootstrap: str) -> DataFrame:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    # Root at WARNING: py4j logs every gateway call at INFO and would bury the batch lines.
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(name)s %(message)s")
+    log.setLevel(logging.INFO)
     spark = (
         SparkSession.builder.appName("oceanclean-telemetry-stream")
         .config("spark.sql.session.timeZone", "UTC")

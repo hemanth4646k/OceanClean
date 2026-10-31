@@ -86,3 +86,15 @@ Decisions along the way:
 - Python's naive `collect()` datetimes are converted with `astimezone(timezone.utc)`, which is correct in any process timezone (`replace(tzinfo=utc)` would be off by the local offset).
 - Spark image: added pytest, plus `pyspark`/`py4j` on `PYTHONPATH` (ENV only). The test fixture sets `spark.jars.ivy=/tmp/.ivy2`, because the host uid has no passwd entry and the JVM home falls back to `?`.
 - Not verified: Compose with no `.env` file at all. A permission rule blocks moving `.env`; `docker compose config` resolves with the optional entry, which Compose 2.40 supports.
+
+2026-10-31: `/code-review` since 3168de6 (both axes). Fixed in a follow-up commit:
+- Ingestion now waits for **this request's** delivery reports instead of trusting `flush()`'s return value. Sync routes share the producer across threadpool workers, so `flush()` counted other requests' queued messages and could return spurious 503s. This replaces the "check `flush()`'s return value" bullet above. Verified: 40 concurrent POSTs all returned 202, and with Kafka stopped a POST still returns 503 after 3.0 s.
+- The stream job's root logger is at WARNING. At INFO, py4j logged every gateway call and outnumbered the batch lines (125 vs 122); now there are none.
+
+Left open (judgement calls, not ticket requirements):
+- Rows dropped by `parse_telemetry` (malformed JSON, null id or ts) aren't counted in the batch log. This predates M1.5; add a parse-failure count when bronze lands (ticket 04).
+- Container ports and mount paths (`--port 8000`, `/state`, `/checkpoints`, `5433:5432`) still appear in Compose next to the settings that reference them.
+- pytest ships in the runtime Spark image (a few MB).
+- Ingestion logs through `uvicorn.error`, so its warnings show in uvicorn's output.
+- `_upsert_params` converts by column name (`event_ts`), not by `TIMESTAMP` type.
+- The stale count uses `<=`, i.e. "not newer than live state", which is exactly what the UPSERT ignores; the log line says so.

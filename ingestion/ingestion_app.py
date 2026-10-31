@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,7 +15,7 @@ from oceanclean_common.telemetry import TELEMETRY_TOPIC, Telemetry, kafka_key
 
 log = logging.getLogger("uvicorn.error")
 # Below the simulator's 5 s HTTP timeout, so a stuck broker surfaces as 503, not a client timeout.
-FLUSH_TIMEOUT_S = 3.0
+ACK_TIMEOUT_S = 3.0
 
 producer: Producer | None = None
 
@@ -74,18 +75,16 @@ def ingest(payload: Telemetry | list[Telemetry]) -> dict[str, int]:
         except BufferError as e:
             raise HTTPException(503, "broker backpressure, retry") from e
         producer.poll(0)
-    still_queued = producer.flush(FLUSH_TIMEOUT_S)
+    # Wait for this request's own delivery reports. flush() would count every request's queue,
+    # since sync routes share the producer across threadpool workers.
+    deadline = time.monotonic() + ACK_TIMEOUT_S
+    while len(reports) < len(events) and time.monotonic() < deadline:
+        producer.poll(0.05)
     errors = [e for e in reports if e is not None]
     acked = len(reports) - len(errors)
-    if still_queued or errors or acked != len(events):
+    if acked != len(events):
         # Unacked events may still be delivered later; a client retry duplicates them, which
         # (vessel_id, seq) dedup absorbs. Losing them silently would not be absorbed.
-        log.warning(
-            "kafka acked %d/%d events (%d queued, errors: %s)",
-            acked,
-            len(events),
-            still_queued,
-            errors[:3],
-        )
+        log.warning("kafka acked %d/%d events (errors: %s)", acked, len(events), errors[:3])
         raise HTTPException(503, f"kafka acknowledged {acked}/{len(events)} events, retry")
     return {"accepted": len(events)}
