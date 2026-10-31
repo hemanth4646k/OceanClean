@@ -98,6 +98,28 @@ services:
       minio-init: { condition: service_completed_successfully }
     mem_limit: 256m
 
+  api:
+    <<: *py
+    command: uvicorn api_app:app --host 0.0.0.0 --port 8000
+    ports: ["8002:8000"]
+    depends_on:
+      postgis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: python -c "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"
+      interval: 3s
+      retries: 30
+    mem_limit: 256m
+
+  # Static build of web/ behind nginx, which proxies /api and /ws to the api service.
+  web:
+    build: { context: ../web }
+    ports: ["8080:80"]
+    environment: *utc
+    depends_on: { api: { condition: service_healthy } }
+    mem_limit: 64m
+    restart: unless-stopped
+
   spark-stream:
     <<: *env
     image: oceanclean-spark

@@ -65,3 +65,13 @@ CREATE INDEX IF NOT EXISTS routes_by_vessel ON routes (vessel_id, route_id DESC)
 -- At most one proposal awaiting the operator and one route being followed, per vessel.
 CREATE UNIQUE INDEX IF NOT EXISTS routes_one_pending ON routes (vessel_id) WHERE status = 'pending';
 CREATE UNIQUE INDEX IF NOT EXISTS routes_one_active ON routes (vessel_id) WHERE status = 'active';
+
+-- Sim clock control (ADR-0003). The simulator reports its clock (sim_now at wall reported_at)
+-- every second and adopts rate/paused, which the API sets for the operator's play/pause/speed.
+CREATE TABLE IF NOT EXISTS sim_clock (
+    vessel_id    TEXT PRIMARY KEY,
+    sim_now      TIMESTAMPTZ NOT NULL,
+    rate         DOUBLE PRECISION NOT NULL CHECK (rate > 0),
+    paused       BOOLEAN NOT NULL,
+    reported_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

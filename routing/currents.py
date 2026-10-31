@@ -55,12 +55,24 @@ class CurrentField:
             return self.time[0]
         return self.time[0] + (t - self.sim_start) % span
 
-    def uv(self, t: float, lat: float, lon: float) -> tuple[float, float]:
-        """Current (u east, v north) in m/s at sim time t; positions off the grid use its edge."""
+    def _bracket(self, t: float) -> tuple[int, int, float]:
+        """Time steps k, k1 around sim time t and the weight of k1."""
         td = self.data_time(t)
         k = min(max(bisect_right(self.time, td) - 1, 0), len(self.time) - 1)
         k1 = min(k + 1, len(self.time) - 1)
         wt = 0.0 if k1 == k else (td - self.time[k]) / (self.time[k1] - self.time[k])
+        return k, k1, wt
+
+    def grid_at(self, t: float) -> tuple[np.ndarray, np.ndarray]:
+        """The whole (u, v) grid [lat, lon] at sim time t, for drawing current particles."""
+        k, k1, wt = self._bracket(t)
+        u = self.u[k] + (self.u[k1] - self.u[k]) * wt
+        v = self.v[k] + (self.v[k1] - self.v[k]) * wt
+        return u, v
+
+    def uv(self, t: float, lat: float, lon: float) -> tuple[float, float]:
+        """Current (u east, v north) in m/s at sim time t; positions off the grid use its edge."""
+        k, k1, wt = self._bracket(t)
         i, wi = _cell(self.lat, lat)
         j, wj = _cell(self.lon, lon)
         out = []

@@ -15,12 +15,17 @@ def pg_dsn(env: Mapping[str, str]) -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{quote(db, safe='')}"
 
 
+def parse_utc(s: str) -> datetime:
+    """ISO-8601 with a UTC offset or trailing Z as an aware datetime; naive input is an error."""
+    ts = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    if ts.utcoffset() is None:
+        raise ValueError(f"timestamp must carry a UTC offset or Z: {s}")
+    return ts
+
+
 def sim_start(env: Mapping[str, str]) -> datetime:
     """SIM_START (ISO-8601 UTC, trailing Z allowed) as an aware datetime."""
-    ts = datetime.fromisoformat(env["SIM_START"].replace("Z", "+00:00"))
-    if ts.utcoffset() is None:
-        raise ValueError("SIM_START must carry a UTC offset or Z")
-    return ts
+    return parse_utc(env["SIM_START"])
 
 
 def s3a_conf(env: Mapping[str, str]) -> dict[str, str]:

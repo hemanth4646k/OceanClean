@@ -44,7 +44,7 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 
 ## Status
 
-Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0007`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. M2 done (`issues/03`): fetch-and-cache of SCUD currents + NCEI microplastics, Spark ETL to silver/gold, hotspot validation 3.9× (median), mission-grid + hotspot exports, works offline. M3 done (`issues/04`): pure-Python routing library (`routing/`), simulator debris world + route follower + offline buffer + fuel/battery, `debris_survey` topic → `debris_patches`, foreachBatch dual write (bronze ticks + guarded UPSERT) with the recalc gate proposing `pending` routes (ADR-0007). Next: **M4 (`issues/05`)**; read the ticket 04 comment (route statuses, HITL timeout vs sim rate, stale sim state) first.
+Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0007`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. M2 done (`issues/03`): fetch-and-cache of SCUD currents + NCEI microplastics, Spark ETL to silver/gold, hotspot validation 3.9× (median), mission-grid + hotspot exports, works offline. M3 done (`issues/04`): pure-Python routing library (`routing/`), simulator debris world + route follower + offline buffer + fuel/battery, `debris_survey` topic → `debris_patches`, foreachBatch dual write (bronze ticks + guarded UPSERT) with the recalc gate proposing `pending` routes (ADR-0007). M4 done (`issues/05`): FastAPI `api/` (REST, `/ws` snapshot + deltas + alerts, accept/reject transitions, sim clock control via the `sim_clock` table) and the `web/` live map (offline base map, canvas current particles, heat, hotspots, patches, ghosts + drift lines, route, wake, clock bar), served by nginx on :8080. Next: **M5 (`issues/06`)**; read the ticket 05 comment (stand-in UI, pending routes never expire yet, clock pause API) first.
 
 ## Environment (dev machine)
 
@@ -58,16 +58,19 @@ All from the repo root. Compose reads `.env.example` (the only defaults); create
 docker compose -f infra/docker-compose.yml up -d --build      # whole stack
 docker compose -f infra/docker-compose.yml logs -f spark-stream
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select seq, event_ts, lat, lon from vessel_state"
-docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint
+docker run --rm -u "$(id -u)" -e HOME=/tmp --network oceanclean_default --env-file .env.example -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint; network/env let tests/test_store.py reach PostGIS (skipped otherwise)
 docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app --entrypoint python oceanclean-spark -m pytest -q -p no:cacheprovider tests/test_stream_spark.py tests/test_currents_etl_spark.py   # Spark fixture tests (skipped in the py image)
 # Batch layer (M2): fetch NOAA data (API, else data/cache) -> bronze, then Spark ETL -> silver/gold/exports.
 mkdir -p data/cache   # before the first fetch, or Docker creates it root-owned
 docker compose -f infra/docker-compose.yml --profile batch run --rm --build -u "$(id -u):$(id -g)" fetch
 docker compose -f infra/docker-compose.yml --profile batch run --rm spark-batch
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select dataset, source, fetched_at from data_sources"
-# Routing (M3): proposals, and a manual Accept until the M5 operator UI exists.
+# Live map (M4): http://localhost:8080 (nginx, proxies /api and /ws to the API on :8002).
+(cd web && npm run dev)   # dev server on :5173 with the same proxy; `npm run build` = tsc + vite build
+curl -s localhost:8002/sim/clock; curl -s -XPOST localhost:8002/sim/clock -H 'content-type: application/json' -d '{"paused": false, "rate": 3600}'
+# Routing (M3): proposals; Accept from the map, or by hand:
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select route_id, status, reason, planned_at, round(compute_ms) from routes order by 1"
-docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "update routes set status='active', decided_at=now() where route_id=<N> and status='pending'"
+curl -s -XPOST localhost:8002/routes/<N>/accept   # or /reject; accept supersedes the active route in one transaction
 infra/reset_sim.sh   # clean sim start: new clock + world, empty live tables, no bronze history; keeps batch data
 ```
 
@@ -75,7 +78,7 @@ The simulator and spark-stream wait for the batch layer's gold exports (`mission
 
 The fetch reuses cached closed months, so only the open month needs the network; a full 25-month download takes about 25 minutes. Without network it falls back to `data/cache` and records `source=cache`. Schema changes to `infra/postgres/init.sql` reach a running DB only by re-applying it (it is idempotent): `docker exec -i oceanclean-postgis-1 psql -U ocean -d oceanclean < infra/postgres/init.sql`.
 
-The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image. Ports: ingestion 8001, PostGIS 5433, MinIO 9000/9001, Kafka 29092 (host), Spark UI 4040.
+The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image. Python services include the API (`api/`), so rebuild it the same way; `web` is its own image (`up -d --build web`). Ports: web 8080, API 8002, ingestion 8001, PostGIS 5433, MinIO 9000/9001, Kafka 29092 (host), Spark UI 4040.
 
 ## Conventions
 

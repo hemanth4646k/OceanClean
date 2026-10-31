@@ -58,7 +58,7 @@ Status: approved (grilling session 2026-10-31). Demo: live demo + presentation, 
 | `batch/` | `fetch_currents.py`, `fetch_microplastics.py` (API → bronze + cache), PySpark ETL: currents grid (silver), climatology + divergence hotspots (gold), hotspot × microplastics join (gold), telemetry gold aggregates |
 | `routing/` | pure Python: bilinear u/v interpolation, RK2 advection, intercept bisection, energy model, greedy 3-target chain, 2 km deviation gate |
 | `api/` | FastAPI REST + WebSocket `/ws` (vessel state, route proposals, alerts, sim clock); operator actions `POST /routes/{id}/accept|reject|modify` |
-| `web/` | React + TS strict + Tailwind + shadcn/ui + Leaflet (CRS simple / dark canvas) + canvas particle layer + Recharts |
+| `web/` | React + TS strict + Tailwind + shadcn/ui + Leaflet (default Web Mercator, no tiles: dark canvas; changed from CRS simple in M4) + canvas particle layer + Recharts |
 
 ## Routing rules
 

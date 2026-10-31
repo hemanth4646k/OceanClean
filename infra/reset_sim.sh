@@ -1,6 +1,7 @@
 #!/bin/sh
-# Clean simulation start: sim clock back to SIM_START, a freshly seeded debris world, empty live
-# state and routes, and no speed-layer history in the lake (a new run reuses seq 1, 2, ...).
+# Clean simulation start: sim clock back to SIM_START at SIM_RATE, unpaused; a freshly seeded
+# debris world; empty live state and routes; and no speed-layer history in the lake (a new run
+# reuses seq 1, 2, ...).
 # Keeps the batch layer (currents, hotspots, exports, data_sources), Kafka and stream checkpoints.
 set -eu
 cd "$(dirname "$0")/.."
@@ -17,7 +18,7 @@ done
 dc stop spark-stream
 dc rm -f simulator
 docker volume rm oceanclean_sim-state
-psql_q "truncate vessel_state, debris_patches; truncate routes restart identity"
+psql_q "truncate vessel_state, debris_patches, sim_clock; truncate routes restart identity"
 dc run --rm --no-deps --build -u "$(id -u)" minio-init python infra/minio/delete_prefixes.py \
   bronze/telemetry/ bronze/debris_survey/
 dc up -d

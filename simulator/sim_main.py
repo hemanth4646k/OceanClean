@@ -24,6 +24,7 @@ from minio import Minio
 from minio.error import S3Error
 from oceanclean_common import settings
 from oceanclean_common.debris import PatchSurvey
+from oceanclean_common.lake import minio_client
 from oceanclean_common.regions import EXPORT_HOTSPOTS, EXPORT_MISSION_GRID, MISSION_BOX
 from oceanclean_common.telemetry import Telemetry
 from sim_clock import SimClock
@@ -36,6 +37,7 @@ log = logging.getLogger("simulator")
 N_PATCHES = 40  # ~26 sim-days to clear with instant accepts; operator time adds more
 WORLD_SEED = 20261101
 ROUTE_POLL_S = 3.0  # real seconds between active-route reads
+CLOCK_SYNC_S = 1.0  # real seconds between clock reports / control reads
 START = (35.0, -142.0)
 
 
@@ -108,6 +110,41 @@ class RouteSource:
         self.targets = waypoint_targets(row[1]) if row else None
 
 
+class ClockControl:
+    """Reports the sim clock to PostGIS and adopts the rate and pause the operator set (API).
+
+    This is the simulation harness, not the vessel's uplink, so it runs during link outages too.
+    """
+
+    SYNC = """
+    INSERT INTO sim_clock (vessel_id, sim_now, rate, paused) VALUES (%s, %s, %s, %s)
+    ON CONFLICT (vessel_id) DO UPDATE SET sim_now = excluded.sim_now, reported_at = now()
+    RETURNING rate, paused
+    """
+
+    def __init__(self, dsn: str, vessel_id: str) -> None:
+        self.dsn, self.vessel_id = dsn, vessel_id
+
+    def sync(self, clock: SimClock) -> None:
+        try:
+            with psycopg.connect(self.dsn, connect_timeout=3) as conn:
+                row = conn.execute(
+                    self.SYNC, [self.vessel_id, clock.now, clock.rate, clock.paused]
+                ).fetchone()
+        except psycopg.Error as e:
+            log.warning(
+                "clock sync failed, keeping rate %s paused=%s: %s", clock.rate, clock.paused, e
+            )
+            return
+        assert row is not None
+        rate, paused = float(row[0]), bool(row[1])
+        if (rate, paused) != (clock.rate, clock.paused):
+            log.info(
+                "sim clock: rate %s -> %s, paused %s -> %s", clock.rate, rate, clock.paused, paused
+            )
+        clock.rate, clock.paused = rate, paused
+
+
 def post_json(client: httpx.Client, url: str, items: list[str]) -> bool:
     try:
         client.post(
@@ -128,13 +165,7 @@ def main() -> None:
     ingest_url, survey_url = env["INGEST_URL"], env["SURVEY_URL"]
     tick_sim_s = float(env["SIM_TICK_SECONDS"])  # sim seconds between telemetry ticks
     sim_start = settings.sim_start(env)
-    minio = Minio(
-        env["MINIO_ENDPOINT"],
-        access_key=env["MINIO_ROOT_USER"],
-        secret_key=env["MINIO_ROOT_PASSWORD"],
-        secure=False,
-    )
-    field, hotspots = load_exports(minio, env["LAKE_BUCKET"], sim_start)
+    field, hotspots = load_exports(minio_client(env), env["LAKE_BUCKET"], sim_start)
 
     resumed = sim_state.load(state_file)
     world: World | None = None
@@ -156,13 +187,18 @@ def main() -> None:
     clock = SimClock(start, rate=float(env["SIM_RATE"]))
     client = httpx.Client(timeout=5)
     routes = RouteSource(settings.pg_dsn(env), vessel_id)
+    control = ClockControl(settings.pg_dsn(env), vessel_id)
     next_tick = clock.now
-    last = last_poll = time.monotonic()
+    last = last_poll = last_sync = time.monotonic()
+    control.sync(clock)  # a rate or pause set before a restart still applies
     routes.poll()
     while True:
         now = time.monotonic()
         clock.advance(now - last)
         last = now
+        if now - last_sync >= CLOCK_SYNC_S:
+            control.sync(clock)
+            last_sync = now
         fresh: list[Telemetry] = []
         survey: list[PatchSurvey] = []
         while clock.now >= next_tick:

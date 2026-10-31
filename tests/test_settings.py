@@ -3,7 +3,7 @@ from datetime import timezone
 from pathlib import Path
 
 import pytest
-from oceanclean_common.settings import lake_url, pg_dsn, s3a_conf, sim_start
+from oceanclean_common.settings import lake_url, parse_utc, pg_dsn, s3a_conf, sim_start
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE_DIRS = ("common", "simulator", "ingestion", "streaming", "batch", "routing", "api", "infra")
@@ -69,3 +69,10 @@ def test_sim_start_is_parsed_as_aware_utc() -> None:
     assert ts.utcoffset() == timezone.utc.utcoffset(None) and ts.hour == 0
     with pytest.raises(ValueError):
         sim_start({"SIM_START": "2026-09-01T00:00:00"})
+
+
+def test_parse_utc_accepts_z_and_offsets_and_rejects_naive_times() -> None:
+    assert parse_utc("2026-09-01T06:00:00Z").hour == 6
+    assert parse_utc("2026-09-01T08:00:00+02:00").astimezone(timezone.utc).hour == 6
+    with pytest.raises(ValueError):
+        parse_utc("2026-09-01T06:00:00")

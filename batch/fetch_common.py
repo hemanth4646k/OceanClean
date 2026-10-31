@@ -78,15 +78,6 @@ def fetch_or_cache(fetch: Callable[[], bytes], cache: Path) -> Fetched:
     return Fetched(data, "api", datetime.now(timezone.utc))
 
 
-def minio_client(env: Mapping[str, str]) -> Minio:
-    return Minio(
-        env["MINIO_ENDPOINT"],
-        access_key=env["MINIO_ROOT_USER"],
-        secret_key=env["MINIO_ROOT_PASSWORD"],
-        secure=False,
-    )
-
-
 def put_object(client: Minio, bucket: str, key: str, data: bytes, content_type: str) -> None:
     client.put_object(bucket, key, io.BytesIO(data), len(data), content_type=content_type)
 

@@ -12,6 +12,7 @@ from oceanclean_common.telemetry import (
 )
 from pydantic import ValidationError
 from sql_schema import PG_TYPE, SPARK_TYPE, table_columns
+from store import VESSEL_COLS
 
 SAMPLE = {
     "vessel_id": "OC-01",
@@ -75,3 +76,9 @@ def test_vessel_state_has_every_contract_column_with_matching_type() -> None:
     for name, f in Telemetry.model_fields.items():
         assert name in cols, f"vessel_state lacks contract column {name}"
         assert cols[name] == PG_TYPE[f.annotation], f"{name}: {cols[name]}"
+
+
+def test_api_vessel_columns_are_the_telemetry_contract() -> None:
+    """The API serves vessel_state as the contract; a new column must reach it too."""
+    cols = [c.strip() for c in VESSEL_COLS.split(",")]
+    assert cols == list(Telemetry.model_fields)

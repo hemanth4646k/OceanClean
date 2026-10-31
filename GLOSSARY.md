@@ -12,6 +12,7 @@
 - **Recalc gate**: the rule that triggers route recomputation only on > 2 km predicted deviation, a collected target, or no active route.
 - **Route proposal**: a `routes` row the gate created, `pending` until the operator accepts (`active`), rejects or it expires (ADR-0007).
 - **Loiter**: the fail-safe low-power circling mode used when the operator doesn't answer within 30 s.
-- **Sim clock**: compressed simulation time; all `event_ts` values are sim time.
+- **Sim clock**: compressed simulation time; all `event_ts` values are sim time. The operator sets its rate and pause through the API (`sim_clock` table).
+- **Wake**: the vessel's recent track on the live map (last 48 sim-hours).
 - **Bronze / silver / gold**: raw / cleaned / aggregated lake layers.
 - **Zone**: 5° lat/lon cell id derived at ingestion, part of the Kafka key.

@@ -47,3 +47,20 @@ def test_loads_the_batch_layer_npz_export() -> None:
     np.savez_compressed(buf, time=time, lat=LAT, lon=LON, u=u, v=-u)
     f = CurrentField.from_npz(buf.getvalue(), datetime.fromtimestamp(T0, timezone.utc))
     assert f.uv(T0 + 3600, 35.0, -142.0) == pytest.approx((0.1, -0.1))
+
+
+def test_grid_at_matches_point_interpolation_on_the_uneven_time_axis() -> None:
+    time = np.array([DATA_T0, DATA_T0 + DAY, DATA_T0 + 3 * DAY])
+    u = np.array([0.0, 1.0, 3.0])[:, None, None] * np.ones((3, len(LAT), len(LON)))
+    f = CurrentField.from_arrays(time, LAT, LON, u, -u, T0)
+    gu, gv = f.grid_at(T0 + 2 * DAY)
+    assert gu.shape == (len(LAT), len(LON))
+    assert gu[5, 7] == pytest.approx(f.uv(T0 + 2 * DAY, LAT[5], LON[7])[0])
+    assert gv[5, 7] == pytest.approx(-2.0)
+
+
+def test_grid_at_loops_over_the_data_window_like_uv() -> None:
+    f = field_of(lambda la, lo: (0.01 * la, 0.0), days=3)
+    a, _ = f.grid_at(T0 + 3600.0)
+    b, _ = f.grid_at(T0 + 2 * DAY + 3600.0)
+    np.testing.assert_allclose(a, b)

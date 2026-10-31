@@ -22,11 +22,11 @@ from fetch_common import (
     cached,
     fetch_or_cache,
     http_get,
-    minio_client,
     put_object,
     record_source,
     write_atomic,
 )
+from oceanclean_common.lake import minio_client
 from oceanclean_common.regions import (
     BRONZE_CURRENTS,
     CURRENTS_MANIFEST,

@@ -13,7 +13,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fetch_common import fetch_or_cache, http_get, minio_client, put_object, record_source
+from fetch_common import fetch_or_cache, http_get, put_object, record_source
+from oceanclean_common.lake import minio_client
 from oceanclean_common.regions import BRONZE_MICROPLASTICS, HISTORY_BOX, Box
 from oceanclean_common.settings import pg_dsn
 
