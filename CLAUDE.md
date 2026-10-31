@@ -68,6 +68,7 @@ docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select dataset,
 # Routing (M3): proposals, and a manual Accept until the M5 operator UI exists.
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select route_id, status, reason, planned_at, round(compute_ms) from routes order by 1"
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "update routes set status='active', decided_at=now() where route_id=<N> and status='pending'"
+infra/reset_sim.sh   # clean sim start: new clock + world, empty live tables, no bronze history; keeps batch data
 ```
 
 The simulator and spark-stream wait for the batch layer's gold exports (`mission_currents.npz`, `hotspots.json`); run the batch profile once on a fresh volume. Python services bake their code into `oceanclean-py`, so `up -d --build` after editing them; spark-stream mounts its code, so `restart spark-stream` is enough.
