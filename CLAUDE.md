@@ -41,6 +41,14 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 .scratch/     local-markdown specs and tickets
 ```
 
+## Status
+
+Setup only, no application code yet. Done: SRS, UI mood images, this file, skill/issue-tracker config, git repo (`main`), Gemini CLI. Next: `/grill-me` on the first vertical slice (simulator -> Kafka -> Spark -> PostGIS), then spec and tickets in `.scratch/<feature>/`. First open decisions: telemetry schema, Compose service set, Spark/Java versions, Iceberg vs plain Parquet, route-optimizer algorithm.
+
+## Environment (dev machine)
+
+Docker 29, Node 26, Python 3.10, Java 22. `uv` and `ripgrep` not installed. Spark 3.5 does not reliably support Java 22; run Spark in a container pinned to Java 17. Command output is compressed by the global `rtk` hook; re-run as `rtk bypass <cmd>` only if a result looks wrong.
+
 ## Commands
 
 None established yet. When you add the first working command (compose up, test, lint, run job), record the exact invocation here. Do not guess commands in the meantime.
@@ -57,7 +65,9 @@ None established yet. When you add the first working command (compose up, test, 
 
 ## Agent skills
 
-Workflow: `/grill-with-docs` -> `/to-spec` -> `/to-tickets` -> `/implement` (drives `/tdd`, closes with `/code-review`). Hard bugs: `/diagnosing-bugs`. Unsure which skill: `/ask-matt`.
+Intended flow: `/grill-with-docs` -> `/to-spec` -> `/to-tickets` -> `/implement` (drives `/tdd`, closes with `/code-review`). Hard bugs: `/diagnosing-bugs`. Unsure which skill: `/ask-matt`.
+
+Installed globally: `grill-me`, `tdd`, `code-review`, `diagnosing-bugs`, `handoff`, `pr`, `research`, `teach`, `ask-matt`. NOT installed: `grill-with-docs`, `to-spec`, `to-tickets`, `implement`, `triage`, `wayfinder`. Until they are, use `/grill-me` to sharpen, write spec/tickets by hand under `.scratch/`, and build with `/tdd`.
 
 ### Delegating to Gemini CLI
 
