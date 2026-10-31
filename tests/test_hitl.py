@@ -10,34 +10,22 @@ def route(rid: int, reason: str, *targets: str) -> dict:
     return {"route_id": rid, "reason": reason, "targets": [{"patch_id": t} for t in targets]}
 
 
-ACTIVE = route(1, "no_route", "P1", "P2")
-
-
 def test_nothing_to_decide_without_a_proposal() -> None:
-    assert decide(None, ACTIVE, {"P1"}, autopilot=True, waited_s=0, timeout_s=30) is None
+    assert decide(None, autopilot=True, waited_s=0, timeout_s=30) is None
 
 
-def test_autopilot_accepts_any_proposal_when_idle() -> None:
+def test_autopilot_accepts_every_proposal_idle_or_mid_route() -> None:
+    """A fresh plan after a collection replaces the rest of the old chain (ADR-0008, amended):
+    rejecting it only made the gate re-propose the same situation every 30 sim-minutes."""
     for reason in ("no_route", "target_collected", "deviation"):
         pending = route(2, reason, "P3")
-        assert decide(pending, None, {"P3"}, autopilot=True, waited_s=0, timeout_s=30) == "accept"
-    # An active route whose targets are all collected is idle too: the vessel loiters.
-    done = route(2, "target_collected", "P3")
-    assert decide(done, ACTIVE, {"P3"}, autopilot=True, waited_s=0, timeout_s=30) == "accept"
-
-
-def test_autopilot_mid_route_takes_only_deviation_corrections() -> None:
-    live = {"P2", "P3"}  # P1 collected, P2 still to go
-    fix = route(2, "deviation", "P2", "P3")
-    other = route(3, "target_collected", "P3")
-    assert decide(fix, ACTIVE, live, autopilot=True, waited_s=0, timeout_s=30) == "accept"
-    assert decide(other, ACTIVE, live, autopilot=True, waited_s=0, timeout_s=30) == "reject"
+        assert decide(pending, autopilot=True, waited_s=0, timeout_s=30) == "accept"
 
 
 def test_manual_mode_holds_the_clock_until_the_timeout_expires_the_proposal() -> None:
     pending = route(2, "deviation", "P3")
-    assert decide(pending, ACTIVE, {"P1"}, autopilot=False, waited_s=29.9, timeout_s=30) == "hold"
-    assert decide(pending, ACTIVE, {"P1"}, autopilot=False, waited_s=30, timeout_s=30) == "expire"
+    assert decide(pending, autopilot=False, waited_s=29.9, timeout_s=30) == "hold"
+    assert decide(pending, autopilot=False, waited_s=30, timeout_s=30) == "expire"
 
 
 def snap(pending: dict | None, hold: bool = False) -> dict:

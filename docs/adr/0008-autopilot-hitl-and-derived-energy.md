@@ -6,6 +6,7 @@ Status: accepted, 2026-10-31 (M5)
 
 - **Idle** (no active route, or every target of it collected, so the vessel loiters): accept any proposal.
 - **Mid-route:** accept only `deviation` proposals. The vessel steers for the stored ghost and sees a patch only within 10 km, so ignoring a large deviation could strand it at an empty ghost. Other mid-route proposals (`target_collected` while targets remain) are rejected, which lets the gate propose again after its 30 sim-minute throttle.
+- **Amended 2026-10-31 (M6, with the user): autopilot now accepts every proposal, mid-route `target_collected` included.** The rejection rule did not stop the gate; it only made it re-propose the same situation every 30 sim-minutes until the chain was done. In a live run 19 of 23 autopilot decisions were such rejections, so the Analytics tab showed "12-17 % accepted" for plans that were fine. A fresh greedy chain after a collection is the policy the ADR-0007 headless run (212 t in ~26 days) and the backfill's onboard autopilot (ADR-0009) already used. The two bullets above describe the old rule.
 - Autopilot decisions raise no toast: at fast rates there would be one every few real seconds. The sidebar shows the active route and who decided it.
 
 **Manual mode** (autopilot off, the live HITL demo) shows the AI Route Optimization modal:

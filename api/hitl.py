@@ -1,10 +1,8 @@
 """Human-in-the-loop rules for route proposals (SRS 5.4, ADR-0007, M5).
 
-Autopilot (the simulation default) decides at once and never holds the clock. When the vessel
-is idle (no active route, or every target of it collected) it accepts any proposal. Mid-route
-it accepts only `deviation` proposals, which correct the plan it follows; the vessel steers for
-the stored ghost and only sees a patch within 10 km, so ignoring a large deviation could strand
-it at an empty ghost. Other mid-route proposals are rejected so the gate can propose again.
+Autopilot (the simulation default) accepts every proposal at once and never holds the clock.
+Until 2026-10-31 it rejected mid-route `target_collected` proposals; the gate then re-proposed the
+same situation every 30 sim-minutes, and the rejections made up ~85 % of its decisions (ADR-0008).
 
 Manual mode holds the sim clock while a proposal is pending; after the timeout (real seconds)
 the proposal expires and the vessel keeps its active route, or loiters if it has none.
@@ -12,33 +10,21 @@ the proposal expires and the vessel keeps its active route, or loiters if it has
 
 from __future__ import annotations
 
-from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
 from oceanclean_common.settings import parse_utc
 
-Action = Literal["accept", "reject", "expire", "hold"]
-
-
-def mid_route(active: dict | None, live_patch_ids: Collection[str]) -> bool:
-    return active is not None and any(t["patch_id"] in live_patch_ids for t in active["targets"])
+Action = Literal["accept", "expire", "hold"]
 
 
 def decide(
-    pending: dict | None,
-    active: dict | None,
-    live_patch_ids: Collection[str],
-    autopilot: bool,
-    waited_s: float,
-    timeout_s: float,
+    pending: dict | None, autopilot: bool, waited_s: float, timeout_s: float
 ) -> Action | None:
     if pending is None:
         return None
     if autopilot:
-        if not mid_route(active, live_patch_ids) or pending["reason"] == "deviation":
-            return "accept"
-        return "reject"
+        return "accept"
     return "expire" if waited_s >= timeout_s else "hold"
 
 
@@ -55,13 +41,12 @@ def step(snap: dict, autopilot: bool, timeout_s: float, extra_s: float, now: flo
     The countdown runs from the route's created_at; `extra_s` extends it while the operator
     modifies the route.
     """
-    pending, active = snap["routes"]["pending"], snap["routes"]["active"]
-    live = {p["patch_id"] for p in snap["patches"] if p["mass_kg"] > 0}
+    pending = snap["routes"]["pending"]
     deadline = None
     if pending is not None and not autopilot:
         deadline = parse_utc(pending["created_at"]).timestamp() + timeout_s + extra_s
     waited = 0.0 if deadline is None else now - (deadline - timeout_s)
-    action = decide(pending, active, live, autopilot, waited, timeout_s)
+    action = decide(pending, autopilot, waited, timeout_s)
     return Step(action, deadline, action == "hold")
 
 

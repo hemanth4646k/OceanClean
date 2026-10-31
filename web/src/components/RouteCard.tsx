@@ -55,7 +55,7 @@ export function RouteCard({
       </label>
       <p className="text-xs text-muted-foreground">
         {hitl?.autopilot
-          ? 'Proposals are decided at once: any when idle, drift corrections mid-route.'
+          ? 'Every proposal is accepted at once, including a fresh plan after each collection.'
           : `You decide each proposal; the sim clock waits up to ${hitl?.timeout_s ?? 30} s.`}
       </p>
       {pending && (

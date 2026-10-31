@@ -146,10 +146,6 @@ class Hub:
             if store.accept_route(conn, rid, "autopilot") is not None:
                 notes = []  # live.changes announces the new active route
                 log.info("route %d accepted by autopilot (%s)", rid, pending["reason"])
-        elif st.action == "reject":
-            if store.reject_route(conn, rid, "autopilot") is not None:
-                notes = []  # no toast: autopilot decides every few real seconds at fast rates
-                log.info("route %d rejected by autopilot (%s)", rid, pending["reason"])
         elif st.action == "expire":
             if store.expire_route(conn, rid) is not None:
                 keeps = "keeps its route" if snap["routes"]["active"] else "loiters"
