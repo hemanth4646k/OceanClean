@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from urllib.parse import quote
 
 
@@ -12,6 +13,14 @@ def pg_dsn(env: Mapping[str, str]) -> str:
     password = quote(env["POSTGRES_PASSWORD"], safe="")
     host, port, db = env["POSTGRES_HOST"], env["POSTGRES_PORT"], env["POSTGRES_DB"]
     return f"postgresql://{user}:{password}@{host}:{port}/{quote(db, safe='')}"
+
+
+def sim_start(env: Mapping[str, str]) -> datetime:
+    """SIM_START (ISO-8601 UTC, trailing Z allowed) as an aware datetime."""
+    ts = datetime.fromisoformat(env["SIM_START"].replace("Z", "+00:00"))
+    if ts.utcoffset() is None:
+        raise ValueError("SIM_START must carry a UTC offset or Z")
+    return ts
 
 
 def s3a_conf(env: Mapping[str, str]) -> dict[str, str]:

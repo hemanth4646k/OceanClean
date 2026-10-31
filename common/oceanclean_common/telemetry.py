@@ -51,15 +51,19 @@ class Telemetry(BaseModel):
     @field_validator("event_ts")
     @classmethod
     def _utc_only(cls, v: datetime) -> datetime:
-        if v.tzinfo is None or v.utcoffset() != timezone.utc.utcoffset(None):
-            raise ValueError("event_ts must be timezone-aware UTC")
-        return v
+        return require_utc(v)
 
     def to_json(self) -> str:
         """Serialise with a strict ISO-8601 UTC timestamp ending in 'Z' (millisecond precision)."""
         d = self.model_dump()
         d["event_ts"] = format_ts(self.event_ts)
         return json.dumps(d, separators=(",", ":"))
+
+
+def require_utc(v: datetime) -> datetime:
+    if v.tzinfo is None or v.utcoffset() != timezone.utc.utcoffset(None):
+        raise ValueError("timestamps must be timezone-aware UTC")
+    return v
 
 
 def format_ts(ts: datetime) -> str:

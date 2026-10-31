@@ -1,8 +1,9 @@
 import re
+from datetime import timezone
 from pathlib import Path
 
 import pytest
-from oceanclean_common.settings import lake_url, pg_dsn, s3a_conf
+from oceanclean_common.settings import lake_url, pg_dsn, s3a_conf, sim_start
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE_DIRS = ("common", "simulator", "ingestion", "streaming", "batch", "routing", "api", "infra")
@@ -61,3 +62,10 @@ def test_code_has_no_second_default_for_a_setting() -> None:
         for m in re.findall(r"(?:environ\.get|getenv)\([^)]*", p.read_text())
     ]
     assert not offenders, "read settings with os.environ[...]; defaults live in .env.example"
+
+
+def test_sim_start_is_parsed_as_aware_utc() -> None:
+    ts = sim_start({"SIM_START": "2026-09-01T00:00:00Z"})
+    assert ts.utcoffset() == timezone.utc.utcoffset(None) and ts.hour == 0
+    with pytest.raises(ValueError):
+        sim_start({"SIM_START": "2026-09-01T00:00:00"})

@@ -44,7 +44,7 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 
 ## Status
 
-Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0006`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. M2 done (`issues/03`): fetch-and-cache of SCUD currents + NCEI microplastics, Spark ETL to silver/gold, hotspot validation 3.9× (median), mission-grid + hotspot exports, works offline. Next: **M3 (`issues/04`)**; read the ticket 03 comment on sim time vs data time first.
+Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0007`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. M2 done (`issues/03`): fetch-and-cache of SCUD currents + NCEI microplastics, Spark ETL to silver/gold, hotspot validation 3.9× (median), mission-grid + hotspot exports, works offline. M3 done (`issues/04`): pure-Python routing library (`routing/`), simulator debris world + route follower + offline buffer + fuel/battery, `debris_survey` topic → `debris_patches`, foreachBatch dual write (bronze ticks + guarded UPSERT) with the recalc gate proposing `pending` routes (ADR-0007). Next: **M4 (`issues/05`)**; read the ticket 04 comment (route statuses, HITL timeout vs sim rate, stale sim state) first.
 
 ## Environment (dev machine)
 
@@ -65,7 +65,12 @@ mkdir -p data/cache   # before the first fetch, or Docker creates it root-owned
 docker compose -f infra/docker-compose.yml --profile batch run --rm --build -u "$(id -u):$(id -g)" fetch
 docker compose -f infra/docker-compose.yml --profile batch run --rm spark-batch
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select dataset, source, fetched_at from data_sources"
+# Routing (M3): proposals, and a manual Accept until the M5 operator UI exists.
+docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select route_id, status, reason, planned_at, round(compute_ms) from routes order by 1"
+docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "update routes set status='active', decided_at=now() where route_id=<N> and status='pending'"
 ```
+
+The simulator and spark-stream wait for the batch layer's gold exports (`mission_currents.npz`, `hotspots.json`); run the batch profile once on a fresh volume. Python services bake their code into `oceanclean-py`, so `up -d --build` after editing them; spark-stream mounts its code, so `restart spark-stream` is enough.
 
 The fetch reuses cached closed months, so only the open month needs the network; a full 25-month download takes about 25 minutes. Without network it falls back to `data/cache` and records `source=cache`. Schema changes to `infra/postgres/init.sql` reach a running DB only by re-applying it (it is idempotent): `docker exec -i oceanclean-postgis-1 psql -U ocean -d oceanclean < infra/postgres/init.sql`.
 
@@ -101,6 +106,8 @@ The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image.
 - Run tool containers with `-u "$(id -u)" -e HOME=/tmp`; running as root leaves root-owned caches in the repo.
 - Wait on async pipelines with a Monitor until-loop that also exits on the first error in the logs, not with fixed sleeps.
 - Update ticket status and CLAUDE.md in the **same commit** as the code they describe, not ahead of it.
+- Spark tests run with `--entrypoint python` under an arbitrary uid, which skips bitnami's user setup, so Hadoop's login fails on any filesystem write. Test DataFrame logic, not Parquet writes; verify lake writes against the stack.
+- `ruff check --fix` deletes imports it thinks are unused, including ones another module imports from this one. Import names from the module that defines them.
 
 ## Agent skills
 

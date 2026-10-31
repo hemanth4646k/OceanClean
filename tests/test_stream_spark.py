@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("pyspark")
 
 import telemetry_stream as ts  # noqa: E402
+from oceanclean_common.debris import PatchSurvey  # noqa: E402
 from oceanclean_common.telemetry import Telemetry  # noqa: E402
 from pyspark.sql import DataFrame, SparkSession  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
@@ -101,3 +102,44 @@ def test_stale_rows_are_those_not_newer_than_stored_state(spark: SparkSession) -
     out = ts.stale_rows(ts.dedup_batch(parsed(spark, FIXTURE)), stored)
     # seq 1 equals the stored instant and seq 3 is 2 h older; OC-02 has no stored row.
     assert keys(out) == [("OC-01", 1), ("OC-01", 3)]
+
+
+def survey(pid: str, hours: float, mass: float) -> PatchSurvey:
+    return PatchSurvey(
+        patch_id=pid,
+        survey_ts=T0 + timedelta(hours=hours),
+        lat=35.4,
+        lon=-139.2,
+        mass_kg=mass,
+        radius_m=2000.0,
+    )
+
+
+def test_survey_json_parses_to_exact_contract_row(spark: SparkSession) -> None:
+    s = survey("P01", 0, 4210.5)
+    raw = spark.createDataFrame([(bytearray(s.to_json(), "utf-8"),)], "value BINARY")
+    row = ts.parse_survey(raw).collect()[0].asDict()
+    row["survey_ts"] = ts.to_utc(row["survey_ts"])
+    assert row == s.model_dump()
+
+
+def test_newest_survey_per_patch_wins(spark: SparkSession) -> None:
+    rows = [survey("P01", 0, 900.0), survey("P01", 1, 400.0), survey("P02", 0, 50.0)]
+    raw = spark.createDataFrame([(bytearray(r.to_json(), "utf-8"),) for r in rows], "value BINARY")
+    out = ts.newest_per(ts.parse_survey(raw), "patch_id", "survey_ts").collect()
+    assert sorted((r.patch_id, r.mass_kg) for r in out) == [("P01", 400.0), ("P02", 50.0)]
+
+
+def test_bronze_partitions_use_event_time_so_late_rows_keep_their_hour(
+    spark: SparkSession,
+) -> None:
+    # The late row (2 h older, buffered) gets its own event hour, not the arrival hour.
+    df = ts.bronze_partitions(ts.dedup_batch(parsed(spark, FIXTURE)), "event_ts")
+    got = sorted((r.seq, r.vessel_id, str(r.date), r.hour) for r in df.collect())
+    assert got == [
+        (1, "OC-01", "2026-09-01", 12),
+        (1, "OC-02", "2026-09-01", 12),
+        (2, "OC-01", "2026-09-01", 12),
+        (3, "OC-01", "2026-09-01", 10),
+    ]
+    assert set(df.columns) == {*ts.SPARK_COLUMNS, "date", "hour"}

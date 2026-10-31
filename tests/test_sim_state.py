@@ -14,8 +14,8 @@ def vessel() -> VesselState:
 
 def test_round_trip(tmp_path: Path) -> None:
     p = tmp_path / "oc.json"
-    sim_state.save(p, NEXT_TICK, vessel())
-    assert sim_state.load(p) == (NEXT_TICK, vessel())
+    sim_state.save(p, NEXT_TICK, vessel(), {"mode": "loiter"})
+    assert sim_state.load(p) == (NEXT_TICK, vessel(), {"mode": "loiter"})
     assert "next_tick" in json.loads(p.read_text())
 
 
@@ -23,7 +23,7 @@ def test_loads_state_written_with_legacy_clock_now_key(tmp_path: Path) -> None:
     p = tmp_path / "oc.json"
     v = vessel()
     p.write_text(json.dumps({"clock_now": NEXT_TICK.isoformat(), "vessel": v.__dict__}))
-    assert sim_state.load(p) == (NEXT_TICK, v)
+    assert sim_state.load(p) == (NEXT_TICK, v, None)
 
 
 def test_missing_file_is_fresh_start(tmp_path: Path) -> None:

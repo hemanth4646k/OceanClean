@@ -92,7 +92,10 @@ services:
     <<: *py
     command: python simulator/sim_main.py
     volumes: [sim-state:/state]
-    depends_on: { ingestion: { condition: service_healthy } }
+    depends_on:
+      ingestion: { condition: service_healthy }
+      postgis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
     mem_limit: 256m
 
   spark-stream:
@@ -114,6 +117,7 @@ services:
       kafka: { condition: service_healthy }
       postgis: { condition: service_healthy }
       ingestion: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
     mem_limit: 2g
 
   # Batch layer, run on demand (`--profile batch`, see CLAUDE.md Commands).

@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-EARTH_R_M = 6_371_000.0
-KN_TO_MS = 0.514444
+from geo import EARTH_R_M, wrap_lon
+
+FUEL_TANK_L = 12_000.0
 
 
 def step_position(
@@ -24,8 +25,7 @@ def step_position(
     north = speed_ms * math.cos(h) + v_ms
     dlat = math.degrees(north * dt_s / EARTH_R_M)
     dlon = math.degrees(east * dt_s / (EARTH_R_M * math.cos(math.radians(lat))))
-    new_lon = (lon + dlon + 180.0) % 360.0 - 180.0
-    return lat + dlat, new_lon
+    return lat + dlat, wrap_lon(lon + dlon)
 
 
 @dataclass
@@ -36,7 +36,7 @@ class VesselState:
     heading_deg: float
     speed_kn: float
     battery_pct: float = 100.0
-    fuel_l: float = 2000.0
+    fuel_l: float = FUEL_TANK_L
     hold_fill_pct: float = 0.0
     debris_density: float = 0.0
     seq: int = 0

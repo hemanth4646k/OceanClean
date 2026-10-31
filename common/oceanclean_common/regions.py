@@ -41,3 +41,6 @@ GOLD_HOTSPOT_VALIDATION = "gold/hotspot_validation"
 # Small exports the API and simulator load without Spark.
 EXPORT_MISSION_GRID = "gold/exports/mission_currents.npz"
 EXPORT_HOTSPOTS = "gold/exports/hotspots.json"
+# Speed-layer history (ADR-0005): raw ticks and surveys, append-only, partitioned by event time.
+BRONZE_TELEMETRY = "bronze/telemetry"
+BRONZE_DEBRIS_SURVEY = "bronze/debris_survey"
