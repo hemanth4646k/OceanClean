@@ -55,6 +55,8 @@ Docker 29, Node 26, Python 3.10, Java 22. `uv` and `ripgrep` not installed. Spar
 All from the repo root. Compose reads `.env.example` (the only defaults); create a `.env` only to override values.
 
 ```
+./start.sh   # whole stack: build, batch layer on a fresh lake (infra/minio/has_objects.py checks the exports), up, wait for the API
+./stop.sh    # down (batch profile too), volumes kept
 docker compose -f infra/docker-compose.yml up -d --build      # whole stack
 docker compose -f infra/docker-compose.yml logs -f spark-stream
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select seq, event_ts, lat, lon from vessel_state"

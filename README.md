@@ -71,19 +71,21 @@ flowchart LR
 - A desktop or landscape-tablet browser at 1080p or more (no mobile layout).
 - Internet for the first data fetch only. After that, everything works offline from `data/cache`.
 
-### 1. Fetch and process the ocean data (once)
+### Start and stop
+
+```bash
+./start.sh   # build images, prepare the ocean data if needed, start everything, wait for the API
+./stop.sh    # stop and remove every container; data volumes are kept
+```
+
+On the first run, `start.sh` also fetches the NOAA data and runs the Spark batch ETL before starting the stack. The fetch downloads about 25 months of SCUD currents and takes roughly 25 minutes. Later starts skip this step, and `stop.sh` then `start.sh` resumes the same simulation. Without network the fetch falls back to `data/cache`.
+
+The same steps by hand, if you prefer:
 
 ```bash
 mkdir -p data/cache   # create it first, or Docker creates it root-owned
 docker compose -f infra/docker-compose.yml --profile batch run --rm --build -u "$(id -u):$(id -g)" fetch
 docker compose -f infra/docker-compose.yml --profile batch run --rm spark-batch
-```
-
-The first fetch downloads about 25 months of NOAA SCUD currents and takes roughly 25 minutes. Later runs reuse the cached months. Without network the fetch falls back to the cache.
-
-### 2. Start the stack
-
-```bash
 docker compose -f infra/docker-compose.yml up -d --build
 ```
 
@@ -95,7 +97,7 @@ curl -s -XPOST localhost:8002/sim/clock -H 'content-type: application/json' -d '
 
 Settings and their defaults live in [.env.example](.env.example). To override a value, create a `.env` next to it; never commit it.
 
-### 3. Demo walkthrough
+### Demo walkthrough
 
 | Step | How |
 |---|---|
@@ -138,6 +140,8 @@ The test suite covers the telemetry contract (pydantic, Spark DDL and SQL schema
 ## Repository layout
 
 ```
+start.sh      start the whole stack (first run also prepares the ocean data)
+stop.sh       stop every container, keeping the data
 infra/        docker-compose.yml, Dockerfiles, PostGIS schema, MinIO setup, reset script
 common/       shared telemetry contract, settings, lake and zone helpers
 simulator/    sim clock, vessel physics and fuel model, debris world, offline buffer, backfill
