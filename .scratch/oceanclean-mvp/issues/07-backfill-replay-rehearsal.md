@@ -1,5 +1,5 @@
 # 07 (M6) Backfill burst, time-slider replay, rehearsal
-Status: open (code done 2026-10-31; the network-off rehearsal and the backup video are manual, for the user)
+Status: done
 Blocked by: 06
 Estimate: 2 h
 
@@ -24,3 +24,5 @@ Review (`/code-review` since f7ff0c5, both axes). Fixed: ADR said "waits" where 
 2026-10-31 (follow-up, with the user) — **Autopilot accepts every proposal.** The Analytics tab showed "12 % autopilot acceptance". Mid-route, autopilot rejected `target_collected` proposals, and the gate then re-proposed the same situation every 30 sim-minutes until the chain was done: 19 of 23 decisions in a live run. Autopilot now accepts all proposals, the policy of the ADR-0007 headless run and the backfill's onboard autopilot. ADR-0008 is amended; the dead reject path in the API hub is gone. Rows from earlier runs keep their old decisions until `reset_sim.sh`.
 - **Modify drag verified in a real browser** (ticket 06 had it open). Headless Chrome driven over DevTools ran Modify, a mouse drag of the first handle and Confirm. Route 33 became `active`, `decided_by='operator'`, with P21's waypoint moved by the dragged distance; the bar showed "1 moved · 81 s left" with the clock held. Cosmetic issue only: ghost labels can overlap near the vessel.
 - **Left as is:** the 1–2 s hold latency (fixing it touches stream, API and simulator) and the code-tidiness items of tickets 04–06 (enums, TS contract test, duplicated helpers, nginx as root, energy parity test). None of them shows in the demo.
+
+2026-10-31 (closing, with the user) — **Closed.** All code is done and verified. The network-off clean-start rehearsal and the 2-min backup video are presentation prep, not software work, so they no longer block this ticket; the user will do them before the demo.
