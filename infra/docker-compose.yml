@@ -116,6 +116,36 @@ services:
       ingestion: { condition: service_healthy }
     mem_limit: 2g
 
+  # Batch layer, run on demand (`--profile batch`, see CLAUDE.md Commands).
+  fetch:
+    <<: *py
+    profiles: [batch]
+    command: sh -c "python batch/fetch_currents.py && python batch/fetch_microplastics.py"
+    # Host directory, so the offline cache survives `down -v`. Create it first (mkdir -p).
+    volumes: [../data/cache:/app/data/cache]
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      postgis: { condition: service_healthy }
+    restart: "no"
+
+  spark-batch:
+    <<: *env
+    profiles: [batch]
+    image: oceanclean-spark
+    build: { context: .., dockerfile: infra/docker/spark.Dockerfile }
+    command: >
+      /opt/bitnami/spark/bin/spark-submit --master local[2] --driver-memory 2g
+      --conf spark.ui.port=4041 --conf spark.driver.extraJavaOptions=-Duser.timezone=UTC
+      /app/batch/currents_etl.py
+    volumes:
+      - ../common:/app/common:ro
+      - ../batch:/app/batch:ro
+    ports: ["4041:4041"]
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    mem_limit: 3g
+    restart: "no"
+
 volumes:
   kafka-data:
   pgdata:

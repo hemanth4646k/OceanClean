@@ -1,5 +1,5 @@
 # 03 (M2) Batch: currents + microplastics → lake → hotspots
-Status: open
+Status: done
 Blocked by: 02
 Estimate: 4 h
 
@@ -29,3 +29,25 @@ Estimate: 4 h
 - Query endpoint: `https://services2.arcgis.com/C8EMgrsFcRFL6LrL/arcgis/rest/services/Marine_Microplastics_WGS84/FeatureServer/0/query`
 - Gyre envelope: `geometry=-180,20,-130,45&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects` → **2,315 records** (22,530 total). Page with `resultOffset`/`resultRecordCount`, `outFields=*`, `f=json`.
 - Useful fields: `Latitude__degree_`, `Longitude_degree_`, `Medium` (filter `Ocean water`), `Sampling_Method` (mostly `Neuston net`), `Microplastics_measurement`, `Unit` (e.g. `pieces/m3`; **units vary, so normalise or filter to one unit**), `Concentration_class_text`, `Date_m_d_yyyy` (epoch ms), `Short_Reference`, `DOI`, `ORGANIZATION`.
+
+## Comments
+
+2026-10-31: Done. Verified against the running stack, online and offline.
+
+- **Row counts:** silver/currents holds 14,884,052 grid vectors (29,768,104 u/v values, so the ticket's "~29M" counts u and v separately) over 734 days, 2024-09-01..2026-09-18. SCUD skips some days. gold/climatology has 243,336 rows; gold/convergence has 1,247 1° cells, 312 of them hotspots. The full ETL takes about 1m45s in `local[2]`.
+- **Validation (saved in gold/hotspot_validation and gold/exports/hotspots.json):** of 2,310 `pieces/m3` samples, 576 fall in hotspot cells and 1,707 in the rest; 27 fall outside analysed cells. The median concentration is 0.0516 in hotspot cells vs 0.0132 elsewhere, **3.90×**. The ratio of means is only 1.15×, because the tails dominate it. ADR-0006 fixes the rules; they were set before the full-history result.
+- **Network off:** with both API hosts pointed at 127.0.0.1 (`--add-host`), the fetchers fell back to `data/cache`, wrote `source=cache` plus the original `fetched_at` to `data_sources`, and re-uploaded bronze. The ETL then produced identical numbers. An online re-run fetches only the open month, about 12 s; the first full download took about 25 min (~1 min/month from the PacIOOS mirror ERDDAP redirects to).
+- 26 new tests: 14 fetcher (py image), 12 Spark fixture tests (convergence on analytic fields, cell ranking, validation ratio, NetCDF → silver, grid export).
+
+Decisions (see ADR-0006):
+- The mission window is cut from the history in the ETL, not fetched separately: the last 45 SCUD days in the mission box, 2026-08-02..2026-09-18, a (45, 40, 60) cube with 0 NaN.
+- Lake keys use `bronze/`, `silver/`, `gold/` (constants in `oceanclean_common.regions`), not `raw/`. The bronze currents have a `manifest.json` that the ETL reads, so stale months never leak in. Silver uses dynamic partition overwrite, so older dates stay.
+- Cached closed months are reused without calling ERDDAP; the open month is always re-fetched. `data/cache/currents/last_day.txt` keeps the true end date for offline runs.
+- Fetchers run in the py image (httpx, minio, psycopg; no NetCDF parsing, only a magic-byte check). The ETL runs in the Spark image, which already ships hadoop-aws and the AWS SDK for s3a.
+- Exports: `gold/exports/mission_currents.npz` (time as epoch s, lat, lon, float32 u/v [t, lat, lon]) and `gold/exports/hotspots.json` (hotspot cells with microplastics counts and medians, plus the validation summary).
+
+For ticket 04:
+- **Sim time vs data time.** `SIM_START=2026-09-01` plus 30 days runs past the last SCUD day (2026-09-18). Routing and the simulator must map sim time onto the mission window, e.g. data time = window start + (sim time − SIM_START), clamped or looped.
+- Hotspots are spread across the whole box, not one compact patch. The top-ranked cell (21.5N, 156.5W) sits beside the Hawaiian islands, where coastal effects are likely. To seed patches in the mission box, filter `hotspots.json` to `MISSION_BOX` and weight by `mp_median`.
+- `infra/postgres/init.sql` gained `data_sources`. On an existing volume, re-apply it (CLAUDE.md Commands).
+- MinIO keeps replaced objects in `.minio.sys/tmp/.trash` for a while (863 MB after several runs); MinIO empties it in the background.

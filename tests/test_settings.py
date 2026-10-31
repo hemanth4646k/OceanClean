@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 import pytest
-from oceanclean_common.settings import pg_dsn
+from oceanclean_common.settings import lake_url, pg_dsn, s3a_conf
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE_DIRS = ("common", "simulator", "ingestion", "streaming", "batch", "routing", "api", "infra")
@@ -32,6 +32,16 @@ def test_pg_dsn_missing_setting_fails_loudly() -> None:
     env = {k: v for k, v in PG_ENV.items() if k != "POSTGRES_HOST"}
     with pytest.raises(KeyError):
         pg_dsn(env)
+
+
+def test_s3a_conf_points_spark_at_minio_from_env() -> None:
+    env = {"MINIO_ENDPOINT": "minio:9000", "MINIO_ROOT_USER": "u", "MINIO_ROOT_PASSWORD": "p"}
+    conf = s3a_conf(env)
+    assert conf["spark.hadoop.fs.s3a.endpoint"] == "http://minio:9000"
+    assert conf["spark.hadoop.fs.s3a.access.key"] == "u"
+    assert conf["spark.hadoop.fs.s3a.secret.key"] == "p"
+    assert conf["spark.hadoop.fs.s3a.path.style.access"] == "true"
+    assert lake_url({"LAKE_BUCKET": "lake"}, "silver/currents") == "s3a://lake/silver/currents"
 
 
 def test_every_setting_read_by_code_has_its_default_in_env_example() -> None:

@@ -8,4 +8,4 @@ ignore = ["ANN401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["common", "simulator", "ingestion", "streaming", "routing", "api"]
+pythonpath = ["common", "simulator", "ingestion", "streaming", "routing", "api", "batch"]

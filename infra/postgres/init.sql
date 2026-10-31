@@ -17,3 +17,13 @@ CREATE TABLE IF NOT EXISTS vessel_state (
     buffered        BOOLEAN NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Provenance of each external dataset (ADR-0002): API or cache fallback, and when it was fetched.
+-- Idempotent: re-apply to a running DB with `psql ... < infra/postgres/init.sql`.
+CREATE TABLE IF NOT EXISTS data_sources (
+    dataset      TEXT PRIMARY KEY,
+    source       TEXT NOT NULL CHECK (source IN ('api', 'cache')),
+    fetched_at   TIMESTAMPTZ NOT NULL,
+    detail       JSONB NOT NULL DEFAULT '{}',
+    recorded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

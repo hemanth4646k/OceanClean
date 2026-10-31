@@ -44,7 +44,7 @@ docs/adr/     architecture decisions;  docs/agents/  skill config
 
 ## Status
 
-Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0005`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. Next: **M2 (`issues/03`)**.
+Planning done (grilling 2026-10-31). Demo is a live demo + presentation on 2026-11-01. Spec: `.scratch/oceanclean-mvp/spec.md`; milestones `issues/01..07`; decisions in `docs/adr/0001..0005`; terms in `GLOSSARY.md`. Resolved: telemetry schema (frozen in spec), Compose set, Spark 3.5.1 on Java 17 via `bitnamilegacy/spark:3.5.1` in `local[2]`, plain Parquet (no Iceberg), own intercept optimizer, NOAA SCUD + NCEI microplastics with fetch-and-cache, sim clock, single cleaner. M1 done (pipe works). M1.5 review fixes done (`issues/02`): late events reach every sink, Kafka acks are checked, settings live only in `.env.example`, contract tests cover types and Spark parsing, cold start verified. M2 done (`issues/03`): fetch-and-cache of SCUD currents + NCEI microplastics, Spark ETL to silver/gold, hotspot validation 3.9× (median), mission-grid + hotspot exports, works offline. Next: **M3 (`issues/04`)**; read the ticket 03 comment on sim time vs data time first.
 
 ## Environment (dev machine)
 
@@ -59,8 +59,15 @@ docker compose -f infra/docker-compose.yml up -d --build      # whole stack
 docker compose -f infra/docker-compose.yml logs -f spark-stream
 docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select seq, event_ts, lat, lon from vessel_state"
 docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app oceanclean-py sh -c "pytest -q && ruff check . && ruff format --check ."   # tests + lint
-docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app --entrypoint python oceanclean-spark -m pytest -q -p no:cacheprovider tests/test_stream_spark.py   # Spark fixture tests (skipped in the py image)
+docker run --rm -u "$(id -u)" -e HOME=/tmp -v "$PWD":/app -w /app --entrypoint python oceanclean-spark -m pytest -q -p no:cacheprovider tests/test_stream_spark.py tests/test_currents_etl_spark.py   # Spark fixture tests (skipped in the py image)
+# Batch layer (M2): fetch NOAA data (API, else data/cache) -> bronze, then Spark ETL -> silver/gold/exports.
+mkdir -p data/cache   # before the first fetch, or Docker creates it root-owned
+docker compose -f infra/docker-compose.yml --profile batch run --rm --build -u "$(id -u):$(id -g)" fetch
+docker compose -f infra/docker-compose.yml --profile batch run --rm spark-batch
+docker exec oceanclean-postgis-1 psql -U ocean -d oceanclean -c "select dataset, source, fetched_at from data_sources"
 ```
+
+The fetch reuses cached closed months, so only the open month needs the network; a full 25-month download takes about 25 minutes. Without network it falls back to `data/cache` and records `source=cache`. Schema changes to `infra/postgres/init.sql` reach a running DB only by re-applying it (it is idempotent): `docker exec -i oceanclean-postgis-1 psql -U ocean -d oceanclean < infra/postgres/init.sql`.
 
 The host has no `python3-venv`; run Python tooling in the `oceanclean-py` image. Ports: ingestion 8001, PostGIS 5433, MinIO 9000/9001, Kafka 29092 (host), Spark UI 4040.
 
