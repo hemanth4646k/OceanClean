@@ -49,5 +49,21 @@ Decisions (see ADR-0006):
 For ticket 04:
 - **Sim time vs data time.** `SIM_START=2026-09-01` plus 30 days runs past the last SCUD day (2026-09-18). Routing and the simulator must map sim time onto the mission window, e.g. data time = window start + (sim time − SIM_START), clamped or looped.
 - Hotspots are spread across the whole box, not one compact patch. The top-ranked cell (21.5N, 156.5W) sits beside the Hawaiian islands, where coastal effects are likely. To seed patches in the mission box, filter `hotspots.json` to `MISSION_BOX` and weight by `mp_median`.
+- The mission grid's time axis is uneven: 45 SCUD days over 48 calendar days. Interpolate on the `time` values, not on index × 86400.
+- `mp_median` is null for hotspot cells without samples (most of them). Weighting by it needs a fallback, e.g. a base weight plus a bonus for measured cells.
+- Say "median" when presenting the 3.9× figure; the ratio of means is 1.15×.
 - `infra/postgres/init.sql` gained `data_sources`. On an existing volume, re-apply it (CLAUDE.md Commands).
 - MinIO keeps replaced objects in `.minio.sys/tmp/.trash` for a while (863 MB after several runs); MinIO empties it in the background.
+
+2026-10-31: `/code-review` since 8799894 (both axes). Fixed in a follow-up commit:
+- **Stale partial month (spec).** A month cached while still open (e.g. 2026-09, data to 09-18) would have been reused forever once it closed. The open month's cache file now carries a `.open` marker, and only marker-free closed months are reused. A successful full-month fetch clears the marker. Tests cover both cases.
+- `source=cache` is now also set when a re-fetch of a closed month falls back to the cache, not only the open month.
+- `computed_at` from Spark `collect()` is converted to UTC explicitly (it relied on the container TZ).
+- ADR-0006 now records why batch reference data is rewritten idempotently despite ADR-0001's "append-only". CLAUDE.md lists ADRs 0001..0006.
+
+Left open (judgement calls):
+- The Compose mount `../data/cache:/app/data/cache` repeats `CACHE_DIR`'s container path, like the other mount paths noted in ticket 02.
+- The API endpoints (`ERDDAP`, `QUERY_URL`) are code constants, not settings.
+- ERDDAP's edge snapping adds a 179.875°E column and a 45.125°N row to silver, just outside the box. They are harmless: those cells never reach 8 sub-cells.
+- `currents_etl.main` is long; it only orchestrates the pure, tested functions.
+- `fetch_features`/`page_params` take a `box` parameter, but every caller passes `HISTORY_BOX`.

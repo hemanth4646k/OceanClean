@@ -13,6 +13,8 @@ from fetch_currents import (
     month_chunks,
     offline_chunks,
     parse_last_time,
+    record_completeness,
+    reusable,
 )
 from oceanclean_common.regions import HISTORY_BOX, Box, to_lon360
 
@@ -113,3 +115,25 @@ def test_box_contains_is_inclusive() -> None:
 def test_chunk_cache_name() -> None:
     c = Chunk(start=date(2026, 8, 1), end=date(2026, 8, 31), closed=True)
     assert c.filename == "scud_pac_2026-08.nc"
+
+
+AUG = Chunk(start=date(2026, 8, 1), end=date(2026, 8, 31), closed=True)
+SEP_OPEN = Chunk(start=date(2026, 9, 1), end=date(2026, 9, 18), closed=False)
+
+
+def test_only_complete_closed_months_are_reused_from_cache(tmp_path: Path) -> None:
+    assert not reusable(AUG, tmp_path)  # not cached yet
+    (tmp_path / AUG.filename).write_bytes(NC)
+    assert reusable(AUG, tmp_path)
+    (tmp_path / SEP_OPEN.filename).write_bytes(NC)
+    assert not reusable(SEP_OPEN, tmp_path)  # the open month always re-fetches
+
+
+def test_a_month_cached_while_open_is_refetched_after_it_closes(tmp_path: Path) -> None:
+    (tmp_path / SEP_OPEN.filename).write_bytes(NC)
+    record_completeness(SEP_OPEN, tmp_path)
+    sep_closed = Chunk(start=date(2026, 9, 1), end=date(2026, 9, 30), closed=True)
+    assert not reusable(sep_closed, tmp_path)  # cached file stops at 09-18
+    record_completeness(sep_closed, tmp_path)  # after a successful full-month fetch
+    assert reusable(sep_closed, tmp_path)
+    assert [c.name for c in offline_chunks(tmp_path, 3)] == ["2026-09"]

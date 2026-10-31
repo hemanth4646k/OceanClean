@@ -327,12 +327,13 @@ def main() -> None:
         .withColumn("computed_at", F.current_timestamp())
     )
     validation.coalesce(1).write.mode("overwrite").parquet(url(GOLD_HOTSPOT_VALIDATION))
-    v = validation.first().asDict()
+    report = validation.first().asDict()
 
     # Exports: mission-window cube for routing/simulator, hotspots for the map and patch seeding.
-    m = MISSION_BOX
+    box = MISSION_BOX
     mission = silver.where(
-        F.col("lat").between(m.lat_min, m.lat_max) & F.col("lon").between(m.lon_min, m.lon_max)
+        F.col("lat").between(box.lat_min, box.lat_max)
+        & F.col("lon").between(box.lon_min, box.lon_max)
     )
     days = mission.select("date").distinct().orderBy(F.desc("date")).limit(MISSION_DAYS).collect()
     cube = grid_arrays(
@@ -346,7 +347,9 @@ def main() -> None:
 
     hot = [r.asDict() for r in gold_cells.where("is_hotspot").collect()]
     keep = ("rank", "lat", "lon", "mean_div", "frac_convergent", "n_days", "mp_n", "mp_median")
-    summary = {k: (val.isoformat() if isinstance(val, datetime) else val) for k, val in v.items()}
+    summary = {
+        k: to_utc(x).isoformat() if isinstance(x, datetime) else x for k, x in report.items()
+    }
     doc = {
         "cell_deg": 1,
         "validation": summary,
@@ -360,17 +363,17 @@ def main() -> None:
         "microplastics: %d %s samples, %d in convergent cells, %d in the rest",
         samples.count(),
         MP_UNIT,
-        v["n_convergent"],
-        v["n_rest"],
+        report["n_convergent"],
+        report["n_rest"],
     )
     log.info(
         "hotspot_validation: median %.4g vs %.4g -> %.2fx; mean %.4g vs %.4g -> %.2fx",
-        v["median_convergent"],
-        v["median_rest"],
-        v["median_ratio"],
-        v["mean_convergent"],
-        v["mean_rest"],
-        v["mean_ratio"],
+        report["median_convergent"],
+        report["median_rest"],
+        report["median_ratio"],
+        report["mean_convergent"],
+        report["mean_rest"],
+        report["mean_ratio"],
     )
     nan = int(np.isnan(cube["u"]).sum())
     log.info(

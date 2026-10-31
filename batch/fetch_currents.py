@@ -42,6 +42,7 @@ ERDDAP = "https://upwell.pfeg.noaa.gov/erddap/griddap"
 DATASET = "scud_pac"
 HISTORY_MONTHS = 24
 LAST_DAY_FILE = "last_day.txt"
+OPEN_MARKER = ".open"  # next to a month file cached before the month was complete
 NETCDF_MAGIC = (b"CDF\x01", b"CDF\x02", b"CDF\x05", b"\x89HDF\r\n\x1a\n")
 
 
@@ -105,6 +106,23 @@ def offline_chunks(cache_dir: Path, n: int) -> list[Chunk]:
     return [Chunk(s, first_of_month(s + timedelta(days=31)) - timedelta(1), True) for s in starts]
 
 
+def reusable(chunk: Chunk, cache_dir: Path) -> bool:
+    """A cached month can stand in for the API only if it was complete when cached."""
+    path = cache_dir / chunk.filename
+    return (
+        chunk.closed and path.exists() and not (cache_dir / (chunk.filename + OPEN_MARKER)).exists()
+    )
+
+
+def record_completeness(chunk: Chunk, cache_dir: Path) -> None:
+    """After a fetch: mark an open month's file as partial, or clear the mark once complete."""
+    marker = cache_dir / (chunk.filename + OPEN_MARKER)
+    if chunk.closed:
+        marker.unlink(missing_ok=True)
+    else:
+        marker.touch()
+
+
 def is_netcdf(data: bytes) -> bool:
     return data.startswith(NETCDF_MAGIC)
 
@@ -143,18 +161,21 @@ def main() -> None:
     end = last or chunks[-1].end
 
     got: list[Fetched] = []
+    fell_back = False  # an attempted download failed and the cache stood in
     for c in chunks:
         path = cache_dir / c.filename
-        if not online or (c.closed and path.exists()):
+        if not online or reusable(c, cache_dir):
             got.append(cached(path))
         else:
             got.append(
                 fetch_or_cache(lambda c=c: download(griddap_url(c.start, c.end, HISTORY_BOX)), path)
             )
+            if got[-1].source == "api":
+                record_completeness(c, cache_dir)
+            else:
+                fell_back = True
         log.info("%s %s %.1f MB", c.name, got[-1].source, len(got[-1].data) / 1e6)
 
-    # "api" only if ERDDAP answered and no attempted download fell back to the cache.
-    fell_back = any(f.source == "cache" for c, f in zip(chunks, got, strict=True) if not c.closed)
     source = "api" if online and not fell_back else "cache"
     client = minio_client(os.environ)
     keys = []
