@@ -59,6 +59,20 @@ None established yet. When you add the first working command (compose up, test, 
 
 Workflow: `/grill-with-docs` -> `/to-spec` -> `/to-tickets` -> `/implement` (drives `/tdd`, closes with `/code-review`). Hard bugs: `/diagnosing-bugs`. Unsure which skill: `/ask-matt`.
 
+### Delegating to Gemini CLI
+
+Claude plans, designs, reviews, and writes the hard logic. Light, well-specified work (Compose/config boilerplate, simple React components, scaffolding, docs) may go to Gemini Flash:
+
+```
+eval "$(sed -n '126p' ~/.bashrc)"   # loads GEMINI_API_KEY; the shell used by agents does not read .bashrc
+gemini -p "<self-contained task or path to a .scratch ticket>"   # default model; do NOT pass -m
+```
+
+- Do not pass `-m gemini-3.8-flash`: it hangs. The default model works.
+- `gemini-3.1-pro-preview` returns 429 (free-tier key, quota 0); don't use it unless the key gets billing.
+- Always review Gemini's diff before committing. One agent edits a given file at a time.
+- Never print or commit the API key.
+
 ### Issue tracker
 
 Local markdown under `.scratch/<feature>/` (spec.md, issues/NN-slug.md). No remote. See `docs/agents/issue-tracker.md`.
