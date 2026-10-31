@@ -15,7 +15,11 @@ function fmt(t: number): string {
     year: 'numeric',
     timeZone: 'UTC',
   })
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
+  const time = d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  })
   return `${date.toUpperCase()} · ${time} UTC`
 }
 
@@ -53,6 +57,9 @@ export function ClockBar({
         <div className="text-xs text-muted-foreground tabular-nums">
           {day !== null ? `Mission day ${day.toFixed(1)}` : 'waiting for the simulator'}
           {clock?.paused && ' · paused'}
+          {clock?.hitl_hold && !clock.paused && (
+            <span className="text-amber-300"> · held for decision</span>
+          )}
         </div>
       </div>
       <div className="flex gap-1">

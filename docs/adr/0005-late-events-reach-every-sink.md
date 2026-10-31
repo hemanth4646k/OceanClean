@@ -9,3 +9,5 @@ Decision:
 - In-batch dedup on `(vessel_id, seq)` (`dropDuplicates` inside `foreachBatch`, which is stateless) keeps obvious replays out of bronze.
 - History dedup is a batch concern: the silver job deduplicates on `(vessel_id, seq)` over the full partition.
 - Watermarks are used **only** by the separate windowed-aggregation query (5-min tumbling windows, M5). Late rows missing from a window there are acceptable and documented.
+
+Note (M5, 2026-10-31): the windowed query is the third query in `streaming/telemetry_stream.py` (`streaming/window_stream.py`): `withWatermark` (10 sim-minutes) → `dropDuplicatesWithinWatermark(["vessel_id","seq"])` → 5-minute windows, append mode, so a window is emitted once the watermark passes its end. It reads Kafka from `latest` offsets, because events of a run before a sim reset would push its watermark past the new run; `infra/reset_sim.sh` deletes its checkpoint. See ADR-0008 for what it computes.

@@ -3,7 +3,15 @@ import random
 import pytest
 from currents import CurrentField
 from debris import Patch
-from energy import CRUISE_KN, CRUISE_MS, HOLD_CAPACITY_KG, LOITER_KN, fuel_l, transit_kw
+from energy import (
+    CRUISE_KN,
+    CRUISE_MS,
+    HOLD_CAPACITY_KG,
+    KWH_PER_L,
+    LOITER_KN,
+    fuel_l,
+    transit_kw,
+)
 from fields import T0, still, uniform
 from fuel import RESERVE_PCT, burn, power_split
 from geo import distance_m, offset
@@ -129,3 +137,15 @@ def test_world_round_trips_through_its_json_form_including_the_queue() -> None:
         link=Link(9.0, [e]),
     )
     assert World.from_dict(w.to_dict()) == w
+
+
+def test_a_fuel_leak_loses_extra_fuel_but_delivers_the_same_power() -> None:
+    v, leaking = vessel(battery_pct=50.0), vessel(battery_pct=50.0)
+    burn(v, "transit", CRUISE_MS, 3600)
+    burn(leaking, "transit", CRUISE_MS, 3600, fuel_factor=1.5)
+    assert FUEL_TANK_L - leaking.fuel_l == pytest.approx(1.5 * (FUEL_TANK_L - v.fuel_l))
+    assert leaking.battery_pct == v.battery_pct
+
+
+def test_litres_to_kwh_inverts_the_fuel_model() -> None:
+    assert fuel_l(100.0, 3600) * KWH_PER_L == pytest.approx(100.0)

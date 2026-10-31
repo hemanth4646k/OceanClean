@@ -7,10 +7,19 @@ import type { Box, Grid, Hotspots, LatLon } from '@/lib/types'
 import { GraticuleLayer } from './GraticuleLayer'
 import { HeatLayer } from './HeatLayer'
 import { COLORS } from './colors'
-import { GhostLayer, HotspotLayer, PatchLayer, RouteLine, VesselLayer } from './OverlayLayers'
+import {
+  DraggableTargets,
+  GhostLayer,
+  HotspotLayer,
+  PatchLayer,
+  RouteLine,
+  VesselLayer,
+} from './OverlayLayers'
+import { withMoves } from './routes'
 import { ParticleLayer } from './ParticleLayer'
 
-export type LayerKey = 'particles' | 'heatmap' | 'hotspots' | 'wake' | 'patches' | 'ghosts' | 'route'
+export type LayerKey =
+  'particles' | 'heatmap' | 'hotspots' | 'wake' | 'patches' | 'ghosts' | 'route'
 export type Layers = Record<LayerKey, boolean>
 
 const boxBounds = (b: Box): [LatLon, LatLon] => [
@@ -33,6 +42,7 @@ export function LiveMap({
   grid,
   hotspots,
   particleSpeed,
+  modify,
 }: {
   live: LiveState
   layers: Layers
@@ -40,6 +50,8 @@ export function LiveMap({
   grid: Grid | null
   hotspots: Hotspots | null
   particleSpeed: number
+  /** Operator-moved targets of the pending route while modifying it, else null. */
+  modify: { moves: Record<string, LatLon>; onMove: (patchId: string, to: LatLon) => void } | null
 }) {
   const { vessel, routes, patches } = live
   const collected = new Set(patches.filter((p) => p.mass_kg <= 0).map((p) => p.patch_id))
@@ -75,7 +87,13 @@ export function LiveMap({
         <Rectangle
           bounds={boxBounds(missionBox)}
           interactive={false}
-          pathOptions={{ color: '#94a3b8', weight: 1, opacity: 0.35, dashArray: '4 6', fill: false }}
+          pathOptions={{
+            color: '#94a3b8',
+            weight: 1,
+            opacity: 0.35,
+            dashArray: '4 6',
+            fill: false,
+          }}
         />
       )}
       {layers.patches && <PatchLayer patches={patches} targets={targets} />}
@@ -86,13 +104,21 @@ export function LiveMap({
       {layers.ghosts && routes.active && (
         <GhostLayer route={routes.active} color={COLORS.active} labels={!routes.pending} />
       )}
-      {layers.route && routes.pending && (
-        <RouteLine route={routes.pending} from={null} skip={new Set()} pending />
+      {(layers.route || modify) && routes.pending && (
+        <RouteLine
+          route={modify ? withMoves(routes.pending, modify.moves) : routes.pending}
+          from={null}
+          skip={new Set()}
+          pending
+        />
       )}
       {layers.route && routes.active && (
         <RouteLine route={routes.active} from={here} skip={collected} pending={false} />
       )}
       {vessel && <VesselLayer vessel={vessel} wake={live.wake} showWake={layers.wake} />}
+      {modify && routes.pending && (
+        <DraggableTargets route={routes.pending} moves={modify.moves} onMove={modify.onMove} />
+      )}
     </MapContainer>
   )
 }

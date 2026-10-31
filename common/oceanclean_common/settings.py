@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 
@@ -21,6 +21,11 @@ def parse_utc(s: str) -> datetime:
     if ts.utcoffset() is None:
         raise ValueError(f"timestamp must carry a UTC offset or Z: {s}")
     return ts
+
+
+def to_utc(ts: datetime) -> datetime:
+    """Spark collect() returns naive datetimes in the Python process's local zone; make it UTC."""
+    return ts.astimezone(timezone.utc)
 
 
 def sim_start(env: Mapping[str, str]) -> datetime:

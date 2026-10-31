@@ -75,3 +75,70 @@ CREATE TABLE IF NOT EXISTS sim_clock (
     paused       BOOLEAN NOT NULL,
     reported_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- M5: who decided a route (operator | autopilot | timeout; ADR-0008), the clock hold while a
+-- proposal awaits the operator, and injected faults for the anomaly demo.
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS decided_by TEXT
+    CHECK (decided_by IN ('operator', 'autopilot', 'timeout'));
+-- The simulator runs only when NOT (paused OR hitl_hold): the operator's pause is separate.
+ALTER TABLE sim_clock ADD COLUMN IF NOT EXISTS hitl_hold BOOLEAN NOT NULL DEFAULT false;
+-- Sim time until which the vessel leaks fuel (1.5x burn): POST /sim/fault.
+CREATE TABLE IF NOT EXISTS sim_faults (
+    vessel_id        TEXT PRIMARY KEY,
+    fuel_leak_until  TIMESTAMPTZ NOT NULL
+);
+
+-- 5-minute event-time windows from the watermarked query (ADR-0005), scored by
+-- streaming/anomaly.py: energy and debris since the previous window, and the fuel-burn z-score.
+CREATE TABLE IF NOT EXISTS telemetry_windows (
+    vessel_id      TEXT NOT NULL,
+    window_end     TIMESTAMPTZ NOT NULL,
+    last_ts        TIMESTAMPTZ NOT NULL,
+    n              INTEGER NOT NULL,
+    fuel_l         DOUBLE PRECISION NOT NULL,
+    battery_pct    DOUBLE PRECISION NOT NULL,
+    hold_fill_pct  DOUBLE PRECISION NOT NULL,
+    energy_kwh     DOUBLE PRECISION NOT NULL,
+    expected_kwh   DOUBLE PRECISION NOT NULL,
+    collected_kg   DOUBLE PRECISION NOT NULL,
+    residual       DOUBLE PRECISION,
+    z              DOUBLE PRECISION,
+    anomaly        BOOLEAN NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (vessel_id, window_end)
+);
+
+-- Alerts for the operator (WebSocket toasts); ts is sim time. Unique so a replayed batch
+-- does not alert twice.
+CREATE TABLE IF NOT EXISTS alerts (
+    alert_id    BIGSERIAL PRIMARY KEY,
+    vessel_id   TEXT NOT NULL,
+    ts          TIMESTAMPTZ NOT NULL,
+    kind        TEXT NOT NULL,
+    level       TEXT NOT NULL CHECK (level IN ('info', 'success', 'warn')),
+    text        TEXT NOT NULL,
+    detail      JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (vessel_id, kind, ts)
+);
+
+-- Spark StreamingQueryListener progress, one row per micro-batch per query (wall time).
+CREATE TABLE IF NOT EXISTS pipeline_metrics (
+    ts             TIMESTAMPTZ NOT NULL,
+    query          TEXT NOT NULL,
+    batch_id       BIGINT NOT NULL,
+    input_rows     BIGINT NOT NULL,
+    input_rps      DOUBLE PRECISION,
+    processed_rps  DOUBLE PRECISION,
+    duration_ms    DOUBLE PRECISION,
+    kafka_lag      BIGINT
+);
+CREATE INDEX IF NOT EXISTS pipeline_metrics_by_ts ON pipeline_metrics (ts DESC);
+
+-- Rows written to each lake dataset: bronze counted by the stream as it appends (a retried
+-- batch counts twice), silver/gold set by the telemetry batch job.
+CREATE TABLE IF NOT EXISTS lake_counts (
+    dataset     TEXT PRIMARY KEY,
+    rows        BIGINT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

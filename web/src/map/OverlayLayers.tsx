@@ -156,3 +156,48 @@ export function VesselLayer({
     </>
   )
 }
+
+const handleIcon = L.divIcon({
+  className: '',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+  html: `<div style="width:18px;height:18px;border-radius:9999px;background:${COLORS.pending};
+    border:2px solid #fff7ed;box-shadow:0 0 0 4px rgba(251,191,36,0.25);cursor:grab"></div>`,
+})
+
+/** Modify: the pending route's target waypoints as draggable handles. */
+export function DraggableTargets({
+  route,
+  moves,
+  onMove,
+}: {
+  route: Route
+  moves: Record<string, LatLon>
+  onMove: (patchId: string, to: LatLon) => void
+}) {
+  return route.waypoints
+    .filter((w) => w.kind === 'target' && w.patch_id)
+    .map((w) => {
+      const id = w.patch_id as string
+      const at = moves[id] ?? [w.lat, w.lon]
+      return (
+        <Marker
+          key={id}
+          position={at}
+          icon={handleIcon}
+          draggable
+          zIndexOffset={2000}
+          eventHandlers={{
+            dragend: (e) => {
+              const p = (e.target as L.Marker).getLatLng()
+              onMove(id, [p.lat, p.lng])
+            },
+          }}
+        >
+          <Tooltip className="oc-label" direction="right" offset={[10, 0]} permanent>
+            {id}
+          </Tooltip>
+        </Marker>
+      )
+    })
+}

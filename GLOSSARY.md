@@ -11,7 +11,11 @@
 - **Intercept**: the earliest point where the vessel can meet a drifting patch.
 - **Recalc gate**: the rule that triggers route recomputation only on > 2 km predicted deviation, a collected target, or no active route.
 - **Route proposal**: a `routes` row the gate created, `pending` until the operator accepts (`active`), rejects or it expires (ADR-0007).
-- **Loiter**: the fail-safe low-power circling mode used when the operator doesn't answer within 30 s.
+- **Loiter**: the low-power circling mode (on battery above its reserve) used when the vessel has no route to follow, e.g. when a proposal expires and there is no active route.
+- **Autopilot**: the default HITL mode; the API decides each proposal at once (any when idle, only drift corrections mid-route) and never holds the clock. Off = the operator decides in the modal within 30 s while the sim clock is held (ADR-0008).
+- **HITL hold**: `sim_clock.hitl_hold`, the API's clock hold while a proposal awaits the operator; separate from the operator's pause.
+- **Window**: a 5-minute event-time (sim time) tumbling window of one vessel's telemetry from the watermarked query; carries measured vs expected energy and the fuel-burn anomaly score (`telemetry_windows`).
+- **Residual**: (measured − expected energy) / expected for one window; its z-score against recent normal windows flags a fuel-burn anomaly.
 - **Sim clock**: compressed simulation time; all `event_ts` values are sim time. The operator sets its rate and pause through the API (`sim_clock` table).
 - **Wake**: the vessel's recent track on the live map (last 48 sim-hours).
 - **Bronze / silver / gold**: raw / cleaned / aggregated lake layers.

@@ -13,6 +13,7 @@ pytest.importorskip("pyspark")
 import currents_etl as etl  # noqa: E402
 import netCDF4  # noqa: E402
 import numpy as np  # noqa: E402
+from oceanclean_common.settings import to_utc  # noqa: E402
 from pyspark.sql import DataFrame, SparkSession  # noqa: E402
 
 R = etl.EARTH_RADIUS_M
@@ -78,7 +79,7 @@ def test_netcdf_to_silver_rows(tmp_path: Path, spark: SparkSession) -> None:
     assert sorted({r.lon for r in rows}) == [-179.875, -129.875, 179.875]
     assert (first.lat, first.lon) == (30.125, -179.875)
     assert first.u == pytest.approx(0.01) and first.v == pytest.approx(-0.01)
-    assert etl.to_utc(first.time) == datetime(2026, 8, 30, tzinfo=timezone.utc)
+    assert to_utc(first.time) == datetime(2026, 8, 30, tzinfo=timezone.utc)
     assert set(out.columns) == {"time", "date", "lat", "lon", "u", "v"}
 
 

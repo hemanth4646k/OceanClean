@@ -44,3 +44,8 @@ EXPORT_HOTSPOTS = "gold/exports/hotspots.json"
 # Speed-layer history (ADR-0005): raw ticks and surveys, append-only, partitioned by event time.
 BRONZE_TELEMETRY = "bronze/telemetry"
 BRONZE_DEBRIS_SURVEY = "bronze/debris_survey"
+# Telemetry batch job (M5): deduplicated ticks with per-tick energy/debris, daily views, export.
+SILVER_TELEMETRY = "silver/telemetry"
+GOLD_TELEMETRY_DAILY = "gold/telemetry_daily"
+GOLD_TELEMETRY_DAILY_ZONE = "gold/telemetry_daily_zone"
+EXPORT_ANALYTICS = "gold/exports/analytics.json"

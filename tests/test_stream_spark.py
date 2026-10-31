@@ -9,6 +9,7 @@ pytest.importorskip("pyspark")
 
 import telemetry_stream as ts  # noqa: E402
 from oceanclean_common.debris import PatchSurvey  # noqa: E402
+from oceanclean_common.settings import to_utc  # noqa: E402
 from oceanclean_common.telemetry import Telemetry  # noqa: E402
 from pyspark.sql import DataFrame, SparkSession  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
@@ -77,7 +78,7 @@ def test_producer_json_parses_to_exact_contract_row(spark: SparkSession) -> None
     row = df.collect()[0].asDict()
     assert all(v is not None for v in row.values()), row
     assert row.pop("_us") == (T0 - EPOCH) // timedelta(microseconds=1)
-    row["event_ts"] = ts.to_utc(row["event_ts"])
+    row["event_ts"] = to_utc(row["event_ts"])
     assert row == t.model_dump()
     assert row["event_ts"].tzinfo == timezone.utc
 
@@ -119,7 +120,7 @@ def test_survey_json_parses_to_exact_contract_row(spark: SparkSession) -> None:
     s = survey("P01", 0, 4210.5)
     raw = spark.createDataFrame([(bytearray(s.to_json(), "utf-8"),)], "value BINARY")
     row = ts.parse_survey(raw).collect()[0].asDict()
-    row["survey_ts"] = ts.to_utc(row["survey_ts"])
+    row["survey_ts"] = to_utc(row["survey_ts"])
     assert row == s.model_dump()
 
 

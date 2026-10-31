@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from 'react'
 import { ms, wsURL } from './api'
-import type { Alert, Clock, LatLon, Patch, Routes, Vessel } from './types'
+import type { Alert, Clock, Hitl, LatLon, Patch, Routes, Vessel } from './types'
 
 export interface LiveState {
   connected: boolean
@@ -9,6 +9,7 @@ export interface LiveState {
   patches: Patch[]
   routes: Routes
   clock: Clock | null
+  hitl: Hitl | null
   clockAt: number // wall ms when `clock` arrived, to extrapolate sim time
   alerts: (Alert & { id: number })[]
 }
@@ -19,6 +20,7 @@ type Msg =
   | { type: 'patches'; data: Patch[] }
   | { type: 'routes'; data: Routes }
   | { type: 'clock'; data: Clock | null }
+  | { type: 'hitl'; data: Hitl }
   | { type: 'alert'; data: Alert }
 
 type Action =
@@ -27,6 +29,7 @@ type Action =
   | { type: 'dismiss'; id: number }
   | { type: 'local-clock'; data: Clock }
   | { type: 'local-routes'; data: Partial<Routes> }
+  | { type: 'local-hitl'; data: Hitl }
 
 const WAKE_MAX = 2000
 let alertId = 0
@@ -38,6 +41,7 @@ const initial: LiveState = {
   patches: [],
   routes: { active: null, pending: null },
   clock: null,
+  hitl: null,
   clockAt: 0,
   alerts: [],
 }
@@ -66,6 +70,9 @@ function reduce(state: LiveState, a: Action): LiveState {
     case 'clock':
     case 'local-clock':
       return { ...state, clock: a.data, clockAt: performance.now() }
+    case 'hitl':
+    case 'local-hitl':
+      return { ...state, hitl: a.data }
     case 'local-routes':
       return { ...state, routes: { ...state.routes, ...a.data } }
     case 'alert':
@@ -101,10 +108,11 @@ export function useLive(): [LiveState, (a: Action) => void] {
   return [state, dispatch]
 }
 
-/** Sim time now, extrapolated from the last clock report at its rate. */
+/** Sim time now, extrapolated from the last clock report at its rate (frozen while paused or
+ * held for a decision). */
 export function simNowMs(state: LiveState, wallNow: number): number | null {
   const c = state.clock
   if (!c) return null
   const base = ms(c.sim_now)
-  return c.paused ? base : base + (wallNow - state.clockAt) * c.rate
+  return c.paused || c.hitl_hold ? base : base + (wallNow - state.clockAt) * c.rate
 }

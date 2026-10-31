@@ -4,7 +4,7 @@ Blocked by: 06
 Estimate: 2 h
 
 ## Do
-- Simulator `--fast-forward 30d`: ~2.6M ticks burst through ingestion/Kafka; gold telemetry aggregates job.
-- Silver telemetry batch job (from ticket 04, ADR-0005): `bronze/telemetry` → full dedup on `(vessel_id, seq)` → `silver/telemetry` partitioned by date; the gold aggregates read silver.
+- Simulator `--fast-forward 30d`: ~2.6M ticks burst through ingestion/Kafka; then the `telemetry-etl` job (from 06).
+- ~~Silver telemetry batch job~~: moved into 06 and done there (`batch/telemetry_etl.py`, Compose `telemetry-etl`: silver/telemetry, gold/telemetry_daily(_zone), `gold/exports/analytics.json`). Here: run it after the backfill and check the Analytics tab fills.
 - Time slider: replay patch drift over a historical window from silver currents.
 - Clean-start rehearsal with network off; fix anything flaky. Record 2-min backup video. Update CLAUDE.md Commands + Status.

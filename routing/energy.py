@@ -18,6 +18,8 @@ HOTEL_KW = 15.0
 COLLECTOR_KW = 20.0  # booms and conveyor while collecting
 SFC_G_PER_KWH = 215.0
 DIESEL_KG_PER_L = 0.84
+KWH_PER_L = DIESEL_KG_PER_L * 1000.0 / SFC_G_PER_KWH  # brake energy per litre burned
+BATTERY_KWH = 300.0
 
 CRUISE_KN = 6.0
 COLLECT_KN = 2.0

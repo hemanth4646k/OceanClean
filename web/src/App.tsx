@@ -1,15 +1,26 @@
 import { Waves } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ClockBar } from '@/components/ClockBar'
+import { HitlModal, ModifyBar } from '@/components/HitlModal'
 import { LayerPanel } from '@/components/LayerPanel'
 import { RouteCard } from '@/components/RouteCard'
-import { StatsBar } from '@/components/StatsBar'
+import { TelemetryPanel } from '@/components/TelemetryPanel'
 import { Toasts } from '@/components/Toasts'
 import { Separator } from '@/components/ui/separator'
 import { getJSON, ms, postJSON } from '@/lib/api'
-import type { Clock, Config, Grid, Hotspots, Route } from '@/lib/types'
+import type { Clock, Config, Grid, Hitl, Hotspots, LatLon, Route } from '@/lib/types'
 import { simNowMs, useLive } from '@/lib/useLive'
 import { LiveMap, type LayerKey, type Layers } from '@/map/LiveMap'
+import { AnalyticsView } from '@/views/AnalyticsView'
+import { MetricsView } from '@/views/MetricsView'
+
+type Role = 'operator' | 'admin'
+type Tab = 'map' | 'metrics' | 'analytics'
+const TABS: { key: Tab; label: string; admin: boolean }[] = [
+  { key: 'map', label: 'Live map', admin: false },
+  { key: 'metrics', label: 'Metrics', admin: true },
+  { key: 'analytics', label: 'Analytics', admin: true },
+]
 
 const GRID_REFRESH_MS = 5000 // the u/v slice follows the sim clock
 const OFFLINE_REAL_S = 10 // live state this far behind the clock (real seconds): link down
@@ -46,6 +57,11 @@ function useGrid(): Grid | null {
   return grid
 }
 
+function tabFromHash(): Tab {
+  const h = location.hash.slice(1)
+  return TABS.some((t) => t.key === h) ? (h as Tab) : 'map'
+}
+
 export default function App() {
   const [live, dispatch] = useLive()
   const config = useStatic<Config>('/config')
@@ -61,6 +77,17 @@ export default function App() {
     route: true,
   })
   const [particleSpeed, setParticleSpeed] = useState(1)
+  // The tab lives in the URL hash (#metrics, #analytics), so views can be linked and reloaded.
+  const [tab, setTabState] = useState<Tab>(tabFromHash)
+  const [role, setRole] = useState<Role>(() => (tabFromHash() === 'map' ? 'operator' : 'admin'))
+  const setTab = useCallback((t: Tab) => {
+    setTabState(t)
+    history.replaceState(null, '', t === 'map' ? location.pathname : `#${t}`)
+  }, [])
+  const [modifying, setModifying] = useState<{
+    routeId: number
+    moves: Record<string, LatLon>
+  } | null>(null)
 
   const liveRef = useRef(live)
   useEffect(() => {
@@ -70,12 +97,18 @@ export default function App() {
 
   const fail = useCallback(
     (e: unknown) =>
-      dispatch({ type: 'alert', data: { kind: 'error', level: 'warn', text: String(e), ts: null } }),
+      dispatch({
+        type: 'alert',
+        data: { kind: 'error', level: 'warn', text: String(e), ts: null },
+      }),
     [dispatch],
   )
   const dismiss = useCallback((id: number) => dispatch({ type: 'dismiss', id }), [dispatch])
   const control = (body: { paused?: boolean; rate?: number }) =>
-    postJSON<Clock>('/sim/clock', body).then((c) => dispatch({ type: 'local-clock', data: c }), fail)
+    postJSON<Clock>('/sim/clock', body).then(
+      (c) => dispatch({ type: 'local-clock', data: c }),
+      fail,
+    )
   const decide = (id: number, action: 'accept' | 'reject') =>
     postJSON<Route>(`/routes/${id}/${action}`).then(
       (r) =>
@@ -85,6 +118,27 @@ export default function App() {
         }),
       fail,
     )
+  const setAutopilot = (on: boolean) =>
+    postJSON<Hitl>('/hitl', { autopilot: on }).then(
+      (h) => dispatch({ type: 'local-hitl', data: h }),
+      fail,
+    )
+  const extend = (id: number) => postJSON(`/routes/${id}/extend`).catch(fail)
+  const startModify = (id: number) => {
+    void extend(id)
+    setModifying({ routeId: id, moves: {} })
+    setTab('map')
+  }
+  const confirmModify = (id: number, moves: Record<string, LatLon>) =>
+    postJSON<Route>(`/routes/${id}/modify`, { waypoints: moves }).then(
+      (r) => dispatch({ type: 'local-routes', data: { active: r, pending: null } }),
+      fail,
+    )
+
+  // A modification applies only to the proposal it started on; a decision or expiry ends it.
+  const { pending, active } = live.routes
+  const mod = modifying && pending?.route_id === modifying.routeId ? modifying : null
+  const showModal = pending && live.hitl && !live.hitl.autopilot && !mod
 
   // How far the live state trails the sim clock. The pipeline adds a few real seconds (hours of
   // sim time at fast rates); much more than that means an uplink outage is queueing telemetry.
@@ -94,70 +148,149 @@ export default function App() {
     lagSimS === null || !clock ? null : { lagSimS, offline: lagSimS / clock.rate > OFFLINE_REAL_S }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-sidebar p-4">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex h-12 shrink-0 items-center gap-6 border-b bg-sidebar px-4">
         <div className="flex items-center gap-2">
-          <Waves className="size-6 text-primary" />
-          <div>
-            <div className="font-semibold tracking-wide">OceanClean</div>
-            <div className="text-xs text-muted-foreground">
-              {config?.vessel_id ?? '…'} · North Pacific gyre
-            </div>
+          <Waves className="size-5 text-primary" />
+          <span className="font-semibold tracking-wide">OceanClean</span>
+          <span className="text-xs text-muted-foreground">
+            {config?.vessel_id ?? '…'} · North Pacific gyre
+          </span>
+        </div>
+        <nav className="flex gap-1">
+          {TABS.filter((t) => role === 'admin' || !t.admin).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`rounded-md px-3 py-1.5 text-sm ${tab === t.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-3">
+          {live.hitl && (
+            <span
+              className={`rounded-md border px-2 py-0.5 text-xs ${live.hitl.autopilot ? 'border-emerald-400/40 text-emerald-300' : 'border-amber-400/40 text-amber-300'}`}
+            >
+              AUTOPILOT: {live.hitl.autopilot ? 'ON' : 'OFF'}
+            </span>
+          )}
+          <div className="flex rounded-md border p-0.5 text-xs" role="radiogroup" aria-label="Role">
+            {(['operator', 'admin'] as const).map((r) => (
+              <button
+                key={r}
+                role="radio"
+                aria-checked={role === r}
+                onClick={() => {
+                  setRole(r)
+                  if (r === 'operator') setTab('map')
+                }}
+                className={`rounded px-2.5 py-1 capitalize ${role === r ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+              >
+                {r}
+              </button>
+            ))}
           </div>
           <span
-            className={`ml-auto size-2 rounded-full ${live.connected ? 'bg-emerald-400' : 'bg-red-400'}`}
+            className={`size-2 rounded-full ${live.connected ? 'bg-emerald-400' : 'bg-red-400'}`}
             title={live.connected ? 'live feed connected' : 'live feed disconnected'}
           />
         </div>
-        <Separator />
-        <LayerPanel
-          layers={layers}
-          onToggle={(k: LayerKey, on: boolean) => setLayers((l) => ({ ...l, [k]: on }))}
-          particleSpeed={particleSpeed}
-          onParticleSpeed={setParticleSpeed}
-        />
-        <Separator />
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold">Routing</h2>
-          <RouteCard active={live.routes.active} pending={live.routes.pending} onDecide={decide} />
-        </div>
-        {hotspots && (
+      </header>
+      <div className="relative flex min-h-0 flex-1">
+        {tab === 'map' ? (
           <>
-            <Separator />
-            <p className="text-xs text-muted-foreground">
-              Hotspot cells hold {hotspots.validation.median_ratio.toFixed(1)}× the median measured
-              microplastics of other cells (NOAA NCEI, {hotspots.validation.n_convergent} vs{' '}
-              {hotspots.validation.n_rest} samples).
-            </p>
+            <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-sidebar p-4">
+              <LayerPanel
+                layers={layers}
+                onToggle={(k: LayerKey, on: boolean) => setLayers((l) => ({ ...l, [k]: on }))}
+                particleSpeed={particleSpeed}
+                onParticleSpeed={setParticleSpeed}
+              />
+              <Separator />
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold">Routing</h2>
+                <RouteCard
+                  active={active}
+                  pending={pending}
+                  hitl={live.hitl}
+                  onAutopilot={setAutopilot}
+                />
+              </div>
+              {hotspots && (
+                <>
+                  <Separator />
+                  <p className="text-xs text-muted-foreground">
+                    Hotspot cells hold {hotspots.validation.median_ratio.toFixed(1)}× the median
+                    measured microplastics of other cells (NOAA NCEI,{' '}
+                    {hotspots.validation.n_convergent} vs {hotspots.validation.n_rest} samples).
+                  </p>
+                </>
+              )}
+            </aside>
+            <main className="relative flex-1">
+              <LiveMap
+                live={live}
+                layers={layers}
+                missionBox={config?.mission_box ?? null}
+                grid={grid}
+                hotspots={hotspots}
+                particleSpeed={particleSpeed}
+                modify={
+                  mod && {
+                    moves: mod.moves,
+                    onMove: (id: string, to: LatLon) =>
+                      setModifying({ ...mod, moves: { ...mod.moves, [id]: to } }),
+                  }
+                }
+              />
+              <div className="pointer-events-none absolute inset-x-0 top-4 z-[1000] flex justify-center">
+                <div className="pointer-events-auto">
+                  <ClockBar
+                    clock={live.clock}
+                    simNow={simNow}
+                    simStart={config?.sim_start ?? null}
+                    onControl={control}
+                  />
+                </div>
+              </div>
+              {mod && pending && live.hitl && (
+                <div className="pointer-events-none absolute inset-x-0 top-24 z-[1000] flex justify-center">
+                  <ModifyBar
+                    hitl={live.hitl}
+                    moved={Object.keys(mod.moves).length}
+                    onConfirm={() => confirmModify(mod.routeId, mod.moves)}
+                    onExtend={() => extend(mod.routeId)}
+                    onCancel={() => setModifying(null)}
+                  />
+                </div>
+              )}
+              <div className="absolute bottom-4 left-4 z-[1000]">
+                <TelemetryPanel vessel={live.vessel} patches={live.patches} link={link} />
+              </div>
+            </main>
           </>
+        ) : (
+          <main className="flex-1 overflow-y-auto">
+            {tab === 'metrics' ? <MetricsView /> : <AnalyticsView />}
+          </main>
         )}
-      </aside>
-      <main className="relative flex-1">
-        <LiveMap
-          live={live}
-          layers={layers}
-          missionBox={config?.mission_box ?? null}
-          grid={grid}
-          hotspots={hotspots}
-          particleSpeed={particleSpeed}
-        />
-        <div className="pointer-events-none absolute inset-x-0 top-4 z-[1000] flex justify-center">
-          <div className="pointer-events-auto">
-            <ClockBar
-              clock={live.clock}
-              simNow={simNow}
-              simStart={config?.sim_start ?? null}
-              onControl={control}
+        {showModal && (
+          <div className="pointer-events-none absolute inset-0 z-[1100] flex items-center justify-center bg-background/30">
+            <HitlModal
+              pending={pending}
+              active={active}
+              hitl={live.hitl!}
+              onDecide={(action) => decide(pending.route_id, action)}
+              onModify={() => startModify(pending.route_id)}
             />
           </div>
-        </div>
-        <div className="absolute top-4 right-4 z-[1000]">
+        )}
+        <div className="absolute top-4 right-4 z-[1200]">
           <Toasts alerts={live.alerts} onDismiss={dismiss} />
         </div>
-        <div className="absolute bottom-4 left-4 z-[1000]">
-          <StatsBar vessel={live.vessel} patches={live.patches} link={link} />
-        </div>
-      </main>
+      </div>
     </div>
   )
 }

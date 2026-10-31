@@ -140,7 +140,7 @@ services:
       postgis: { condition: service_healthy }
       ingestion: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
-    mem_limit: 2g
+    mem_limit: 2560m  # three queries; two alone used ~1.6 GB
 
   # Batch layer, run on demand (`--profile batch`, see CLAUDE.md Commands).
   fetch:
@@ -170,6 +170,26 @@ services:
     depends_on:
       minio-init: { condition: service_completed_successfully }
     mem_limit: 3g
+    restart: "no"
+
+  # Telemetry history (M5): bronze ticks -> silver -> gold daily views + the analytics export.
+  telemetry-etl:
+    <<: *env
+    profiles: [batch]
+    image: oceanclean-spark
+    build: { context: .., dockerfile: infra/docker/spark.Dockerfile }
+    command: >
+      /opt/bitnami/spark/bin/spark-submit --master local[2] --driver-memory 1g
+      --conf spark.ui.port=4042 --conf spark.driver.extraJavaOptions=-Duser.timezone=UTC
+      /app/batch/telemetry_etl.py
+    volumes:
+      - ../common:/app/common:ro
+      - ../batch:/app/batch:ro
+      - ../routing:/app/routing:ro
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      postgis: { condition: service_healthy }
+    mem_limit: 1536m
     restart: "no"
 
 volumes:

@@ -28,6 +28,7 @@ def snap(**over: object) -> dict:
         "patches": [patch("P21", 5000.0)],
         "routes": {"active": None, "pending": None},
         "clock": {"sim_now": "2026-09-01T01:00:00Z", "rate": 60.0, "paused": False},
+        "hitl": {"autopilot": True, "timeout_s": 30.0, "deadline": None},
     }
     return {**base, **over}
 
@@ -65,7 +66,7 @@ def test_only_changed_parts_are_sent() -> None:
 
 def test_first_poll_sends_everything_without_alerts() -> None:
     msgs = changes(None, snap(routes={"active": None, "pending": route(1)}))
-    assert {m["type"] for m in msgs} == {"vessel", "patches", "routes", "clock"}
+    assert {m["type"] for m in msgs} == {"vessel", "patches", "routes", "clock", "hitl"}
 
 
 def test_new_proposal_raises_an_alert() -> None:
@@ -81,6 +82,12 @@ def test_accepting_a_proposal_alerts_once_for_the_new_active_route() -> None:
     b = snap(routes={"active": route(7, "active"), "pending": None})
     alerts = [m["data"] for m in changes(a, b) if m["type"] == "alert"]
     assert [x["kind"] for x in alerts] == ["active"]
+
+
+def test_routes_the_autopilot_accepts_raise_no_alert() -> None:
+    # At fast sim rates autopilot decides every few real seconds; the sidebar shows it instead.
+    b = snap(routes={"active": {**route(7, "active"), "decided_by": "autopilot"}, "pending": None})
+    assert [m for m in changes(snap(), b) if m["type"] == "alert"] == []
 
 
 def test_collected_patch_raises_an_alert_but_a_partial_haul_does_not() -> None:

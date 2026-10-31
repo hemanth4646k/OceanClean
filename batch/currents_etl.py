@@ -32,7 +32,7 @@ from oceanclean_common.regions import (
     MISSION_BOX,
     SILVER_CURRENTS,
 )
-from oceanclean_common.settings import lake_url, s3a_conf
+from oceanclean_common.settings import lake_url, s3a_conf, to_utc
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
@@ -48,11 +48,6 @@ MP_UNIT = "pieces/m3"  # 2,310 of 2,315 gyre samples; the rest are beach counts
 
 # One row per (time, latitude) of a NetCDF file; exploded to cells in the JVM, not in Python.
 ROW_DDL = "time DOUBLE, lat DOUBLE, lon ARRAY<DOUBLE>, u ARRAY<FLOAT>, v ARRAY<FLOAT>"
-
-
-def to_utc(ts: datetime) -> datetime:
-    """Spark collect() returns naive datetimes in the Python process's local zone; make it UTC."""
-    return ts.astimezone(timezone.utc)
 
 
 def month_of(path: str) -> str:

@@ -1,7 +1,7 @@
-import { Check, X } from 'lucide-react'
+import { Bot } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import type { Route } from '@/lib/types'
+import { Switch } from '@/components/ui/switch'
+import type { Hitl, Route } from '@/lib/types'
 
 function Summary({ route }: { route: Route }) {
   return (
@@ -28,59 +28,56 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-/**
- * Pending proposal with Accept / Reject, and the active route. A stand-in for the M5 modal
- * (countdown, Modify, clock pause), so routes can be accepted from the map.
- */
+/** Routing in the sidebar: the autopilot switch, the route being followed, any proposal. */
 export function RouteCard({
   active,
   pending,
-  onDecide,
+  hitl,
+  onAutopilot,
 }: {
   active: Route | null
   pending: Route | null
-  onDecide: (id: number, action: 'accept' | 'reject') => void
+  hitl: Hitl | null
+  onAutopilot: (on: boolean) => void
 }) {
-  if (!active && !pending) {
-    return <p className="text-sm text-muted-foreground">No route: the vessel loiters.</p>
-  }
   return (
     <div className="space-y-4">
+      <label className="flex cursor-pointer items-center justify-between text-sm">
+        <span className="flex items-center gap-2">
+          <Bot className="size-4 text-muted-foreground" />
+          Autopilot
+        </span>
+        <Switch
+          checked={hitl?.autopilot ?? false}
+          disabled={!hitl}
+          onCheckedChange={(on) => onAutopilot(on)}
+        />
+      </label>
+      <p className="text-xs text-muted-foreground">
+        {hitl?.autopilot
+          ? 'Proposals are decided at once: any when idle, drift corrections mid-route.'
+          : `You decide each proposal; the sim clock waits up to ${hitl?.timeout_s ?? 30} s.`}
+      </p>
       {pending && (
-        <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/5 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold">Proposal #{pending.route_id}</span>
-            <Badge variant="outline" className="border-amber-400/50 text-amber-300">
-              {pending.reason.replace('_', ' ')}
-            </Badge>
-          </div>
-          <Summary route={pending} />
-          <div className="text-xs text-muted-foreground">
-            Planned in {pending.compute_ms.toFixed(0)} ms
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" className="flex-1" onClick={() => onDecide(pending.route_id, 'accept')}>
-              <Check /> Accept
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="flex-1"
-              onClick={() => onDecide(pending.route_id, 'reject')}
-            >
-              <X /> Reject
-            </Button>
-          </div>
+        <div className="flex items-center justify-between rounded-lg border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-sm">
+          <span>Proposal #{pending.route_id}</span>
+          <Badge variant="outline" className="border-amber-400/50 text-amber-300">
+            awaiting decision
+          </Badge>
         </div>
       )}
-      {active && (
+      {active ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold">Active route #{active.route_id}</span>
-            <Badge className="bg-cyan-400/15 text-cyan-300">following</Badge>
+            <Badge className="bg-cyan-400/15 text-cyan-300">
+              {active.decided_by === 'autopilot' ? 'autopilot' : 'operator'}
+            </Badge>
           </div>
           <Summary route={active} />
         </div>
+      ) : (
+        !pending && <p className="text-sm text-muted-foreground">No route: the vessel loiters.</p>
       )}
     </div>
   )

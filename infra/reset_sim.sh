@@ -1,8 +1,10 @@
 #!/bin/sh
 # Clean simulation start: sim clock back to SIM_START at SIM_RATE, unpaused; a freshly seeded
-# debris world; empty live state and routes; and no speed-layer history in the lake (a new run
-# reuses seq 1, 2, ...).
-# Keeps the batch layer (currents, hotspots, exports, data_sources), Kafka and stream checkpoints.
+# debris world; empty live state, routes, windows, alerts, faults and metrics; and no telemetry
+# history in the lake (a new run reuses seq 1, 2, ...).
+# Keeps the batch layer's currents, hotspots and their exports (data_sources), Kafka, and the
+# telemetry/survey stream checkpoints. Drops the windows query's checkpoint: its watermark is
+# in the old run's sim time and would drop every event of the new run as late.
 set -eu
 cd "$(dirname "$0")/.."
 dc() { docker compose -f infra/docker-compose.yml "$@"; }
@@ -18,8 +20,12 @@ done
 dc stop spark-stream
 dc rm -f simulator
 docker volume rm oceanclean_sim-state
-psql_q "truncate vessel_state, debris_patches, sim_clock; truncate routes restart identity"
+# alerts keeps its sequence: the running API broadcasts rows above the last id it has seen.
+psql_q "truncate vessel_state, debris_patches, sim_clock, sim_faults, telemetry_windows, alerts,
+  pipeline_metrics, lake_counts; truncate routes restart identity"
+dc run --rm --no-deps --entrypoint sh spark-stream -c 'rm -rf "$WINDOW_CHECKPOINT_DIR"'
 dc run --rm --no-deps --build -u "$(id -u)" minio-init python infra/minio/delete_prefixes.py \
-  bronze/telemetry/ bronze/debris_survey/
+  bronze/telemetry/ bronze/debris_survey/ silver/telemetry/ gold/telemetry_daily/ \
+  gold/telemetry_daily_zone/ gold/exports/analytics.json
 dc up -d
 echo "reset done; the simulator starts at SIM_START with a new world"

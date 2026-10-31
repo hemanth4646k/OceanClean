@@ -39,6 +39,7 @@ WORLD_SEED = 20261101
 ROUTE_POLL_S = 3.0  # real seconds between active-route reads
 CLOCK_SYNC_S = 1.0  # real seconds between clock reports / control reads
 START = (35.0, -142.0)
+LEAK_FACTOR = 1.5  # fuel lost per unit of power during an injected leak (POST /sim/fault)
 
 
 def to_telemetry(v: VesselState, ts: datetime, buffered: bool = False) -> Telemetry:
@@ -111,26 +112,30 @@ class RouteSource:
 
 
 class ClockControl:
-    """Reports the sim clock to PostGIS and adopts the rate and pause the operator set (API).
+    """Reports the sim clock to PostGIS and adopts the operator's rate and pause (API), the hold
+    while a route proposal awaits the operator, and any injected fuel leak.
 
     This is the simulation harness, not the vessel's uplink, so it runs during link outages too.
     """
 
     SYNC = """
-    INSERT INTO sim_clock (vessel_id, sim_now, rate, paused) VALUES (%s, %s, %s, %s)
+    INSERT INTO sim_clock (vessel_id, sim_now, rate, paused) VALUES (%s, %s, %s, false)
     ON CONFLICT (vessel_id) DO UPDATE SET sim_now = excluded.sim_now, reported_at = now()
-    RETURNING rate, paused
+    RETURNING rate, paused OR hitl_hold,
+              (SELECT fuel_leak_until FROM sim_faults WHERE vessel_id = sim_clock.vessel_id)
     """
 
     def __init__(self, dsn: str, vessel_id: str) -> None:
         self.dsn, self.vessel_id = dsn, vessel_id
+        self.leak_until: datetime | None = None
+
+    def fuel_factor(self, now: datetime) -> float:
+        return LEAK_FACTOR if self.leak_until is not None and now < self.leak_until else 1.0
 
     def sync(self, clock: SimClock) -> None:
         try:
             with psycopg.connect(self.dsn, connect_timeout=3) as conn:
-                row = conn.execute(
-                    self.SYNC, [self.vessel_id, clock.now, clock.rate, clock.paused]
-                ).fetchone()
+                row = conn.execute(self.SYNC, [self.vessel_id, clock.now, clock.rate]).fetchone()
         except psycopg.Error as e:
             log.warning(
                 "clock sync failed, keeping rate %s paused=%s: %s", clock.rate, clock.paused, e
@@ -138,6 +143,9 @@ class ClockControl:
             return
         assert row is not None
         rate, paused = float(row[0]), bool(row[1])
+        if row[2] != self.leak_until:
+            log.info("fuel leak until %s", row[2])
+            self.leak_until = row[2]
         if (rate, paused) != (clock.rate, clock.paused):
             log.info(
                 "sim clock: rate %s -> %s, paused %s -> %s", clock.rate, rate, clock.paused, paused
@@ -208,7 +216,8 @@ def main() -> None:
                     "link down until %s",
                     datetime.fromtimestamp(world.link.offline_until, timezone.utc),
                 )
-            tick(world, v, t - tick_sim_s, tick_sim_s, field, routes.targets, rng)
+            factor = control.fuel_factor(next_tick)
+            tick(world, v, t - tick_sim_s, tick_sim_s, field, routes.targets, rng, factor)
             v.seq += 1
             fresh.append(to_telemetry(v, next_tick.astimezone(timezone.utc)))
             if t >= world.next_survey:

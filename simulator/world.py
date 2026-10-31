@@ -125,6 +125,7 @@ def tick(
     field: CurrentField,
     route: RouteTargets | None,
     rng: random.Random,
+    fuel_factor: float = 1.0,
 ) -> None:
     """Advance the vessel and the debris world by dt sim seconds starting at sim time t."""
     if w.mode == "offload" and t >= w.offload_until:
@@ -147,7 +148,7 @@ def tick(
         if v.hold_fill_pct >= 100.0 - 1e-9:
             v.hold_fill_pct = 100.0
             mode, w.offload_until = "offload", t + dt + OFFLOAD_S
-    burn(v, mode, speed * KN_TO_MS, dt)
+    burn(v, mode, speed * KN_TO_MS, dt, fuel_factor)
     drift_patches(w.patches, field, t, dt, rng)
     v.debris_density = debris_density(w.patches, v.lat, v.lon)
     w.mode = mode

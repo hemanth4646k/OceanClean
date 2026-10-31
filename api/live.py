@@ -1,15 +1,16 @@
 """Live-view logic for the WebSocket: what changed between two polls, and the vessel's wake.
 
 A snapshot is the JSON-ready state the API polls from PostGIS once a second: `vessel`,
-`patches`, `routes` ({active, pending}) and `clock`. Clients get the full snapshot on connect,
-then only the parts that changed, plus alerts for proposals, accepted routes and collections.
+`patches`, `routes` ({active, pending}) and `clock`, plus the hub's `hitl` state. Clients get
+the full snapshot on connect, then only the parts that changed, plus alerts for proposals,
+accepted routes and collections.
 """
 
 from __future__ import annotations
 
 from collections import deque
 
-PARTS = ("vessel", "patches", "routes", "clock")
+PARTS = ("vessel", "patches", "routes", "clock", "hitl")
 
 
 class Wake:
@@ -56,7 +57,9 @@ def _alerts(prev: dict, cur: dict) -> list[dict]:
         )
         out.append({"kind": "proposal", "level": "info", "text": text})
     active, was_active = cur["routes"]["active"], prev["routes"]["active"]
-    if active and (not was_active or was_active["route_id"] != active["route_id"]):
+    by_autopilot = active is not None and active.get("decided_by") == "autopilot"
+    new_active = active and (not was_active or was_active["route_id"] != active["route_id"])
+    if new_active and not by_autopilot:  # autopilot decides often; the sidebar shows it
         out.append(
             {"kind": "active", "level": "info", "text": f"Route {active['route_id']} active"}
         )

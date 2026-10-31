@@ -75,6 +75,7 @@ export interface Route {
   planned_at: string
   created_at: string
   decided_at: string | null
+  decided_by: 'operator' | 'autopilot' | 'timeout' | null
   energy_kwh: number
   mass_kg: number
   compute_ms: number
@@ -92,11 +93,19 @@ export interface Clock {
   sim_now: string
   rate: number
   paused: boolean
+  hitl_hold: boolean // held while a proposal awaits the operator
   reported_at: string
 }
 
+/** Human-in-the-loop state from the API hub; `deadline` is wall-clock time while held. */
+export interface Hitl {
+  autopilot: boolean
+  timeout_s: number
+  deadline: string | null
+}
+
 export interface Alert {
-  kind: 'proposal' | 'active' | 'collected' | 'error'
+  kind: 'proposal' | 'active' | 'collected' | 'expired' | 'fuel_anomaly' | 'error'
   level: 'info' | 'success' | 'warn'
   text: string
   ts: string | null
@@ -126,4 +135,60 @@ export interface Grid {
   lon: number[]
   u: number[][]
   v: number[][]
+}
+
+export type QueryName = 'telemetry' | 'debris_survey' | 'windows'
+
+export interface MetricPoint {
+  t: string // wall time, bucket start
+  query: QueryName
+  rows_per_s: number
+  duration_ms: number | null
+  kafka_lag: number | null
+}
+
+export interface QueryProgress {
+  ts: string
+  query: QueryName
+  batch_id: number
+  input_rows: number
+  input_rps: number | null
+  processed_rps: number | null
+  duration_ms: number | null
+  kafka_lag: number | null
+}
+
+export interface HourWindow {
+  hour: string // sim time
+  energy_kwh: number
+  collected_kg: number
+  fuel_l: number
+  battery_pct: number
+  anomalies: number
+}
+
+export interface Metrics {
+  bucket_s: number
+  series: MetricPoint[]
+  latest: QueryProgress[]
+  lake: { dataset: string; rows: number; updated_at: string }[]
+  hourly: HourWindow[]
+}
+
+export interface Yield {
+  rows: number
+  energy_kwh: number
+  collected_kg: number
+  kg_per_kwh: number | null
+}
+
+export interface Analytics {
+  telemetry: {
+    computed_at: string
+    daily: (Yield & { date: string })[]
+    zones: (Yield & { zone: string })[]
+  } | null
+  decisions: { by: 'operator' | 'autopilot' | 'timeout'; status: RouteStatus; n: number }[]
+  acceptance: { operator: number | null; autopilot: number | null; overall: number | null }
+  validation: { median_ratio: number; n_convergent: number; n_rest: number } | null
 }
